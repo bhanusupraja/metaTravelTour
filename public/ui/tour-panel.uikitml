@@ -1,0 +1,205 @@
+<!--
+  The one-thing tour panel. Exactly one short line + the buttons for the
+  current step. Every button exists here but starts hidden; the system
+  shows only the ones for the current phase, so no screen ever shows a
+  big block of information or many panels at once.
+  Layout follows the Screen 2 / Screen 4 mockups: the mic is the big
+  glowing button, centred on its own row with History and Photo beside
+  it at a destination; the place buttons sit on their own centred row.
+  Panel, Button and ButtonLabel come from the bundled Horizon kit.
+-->
+<style>
+  .panel-root {
+    flex-direction: column;
+    width: 400px;
+  }
+
+  .panel-content {
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 16px;
+    padding-bottom: 10px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .eyebrow {
+    color: #f5d90a;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+  }
+
+  .line {
+    color: #fafaf7;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 28px;
+  }
+
+  .btnrow {
+    flex-direction: row;
+    gap: 6px;
+    padding-left: 12px;
+    padding-right: 12px;
+    padding-bottom: 8px;
+  }
+
+  .btnrow-center {
+    flex-direction: row;
+    justify-content: center;
+    gap: 6px;
+    padding-left: 12px;
+    padding-right: 12px;
+    padding-bottom: 8px;
+  }
+
+  .btn-big {
+    padding-top: 16px;
+    padding-bottom: 16px;
+    padding-left: 44px;
+    padding-right: 44px;
+  }
+
+  .btn-mic-glow {
+    background-color: #f8fafc;
+    border-color: #7dd3fc;
+    border-width: 2px;
+    border-radius: 20px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+
+  .btn-mic-icon {
+    background-color: #dc2626;
+    border-radius: 22px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .btn-mic-label {
+    color: #0f172a;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .btn-choice-place {
+    width: 62px;
+    font-size: 12px;
+  }
+</style>
+<Panel id="tour-root" class="panel-root">
+  <div class="panel-content">
+    <div id="tour-sub" class="eyebrow">CHITTI</div>
+    <div id="tour-line" class="line">Welcome!</div>
+  </div>
+  <div class="btnrow">
+    <Button id="btn-next" class="btn-big" style="display: none">
+      <ButtonLabel id="btn-next-label">Next</ButtonLabel>
+    </Button>
+    <Button id="btn-skip" style="display: none">
+      <ButtonLabel>Skip tutorial</ButtonLabel>
+    </Button>
+    <Button id="btn-restart" style="display: none">
+      <ButtonLabel>Restart tutorial</ButtonLabel>
+    </Button>
+    <Button id="btn-back" style="display: none">
+      <ButtonLabel>Change place</ButtonLabel>
+    </Button>
+    <Button id="btn-start-ride" style="display: none">
+      <ButtonLabel>Start ride</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow-center">
+    <!-- ONE Google Meet-style mic icon button (Bhanu 2026-11-17 07:43):
+         a single mic icon that toggles mute on/off. No "Tap to speak"
+         text — the icon IS the button. Mic = listening (dark button),
+         MicOff = muted (red button); the system swaps them live. -->
+    <Button id="btn-mic" class="btn-mic-icon" style="display: none">
+      <Mic id="btn-mic-icon-on" width="20" height="20" color="#ffffff" />
+      <MicOff id="btn-mic-icon-off" width="20" height="20" color="#ffffff" style="display: none" />
+    </Button>
+    <Button id="btn-history" style="display: none">
+      <ButtonLabel>History</ButtonLabel>
+    </Button>
+    <Button id="btn-photo" style="display: none">
+      <ButtonLabel id="btn-photo-label">Photo</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow-center">
+    <Button id="btn-journal" style="display: none">
+      <ButtonLabel>My Journal</ButtonLabel>
+    </Button>
+    <Button id="btn-send-journal" style="display: none">
+      <ButtonLabel>Send to Journal</ButtonLabel>
+    </Button>
+    <Button id="btn-journal-close" style="display: none">
+      <ButtonLabel>Close Journal</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow-center">
+    <Button id="btn-place-times" class="btn-choice-place" style="display: none">
+      <ButtonLabel>Times Square</ButtonLabel>
+    </Button>
+    <Button id="btn-place-park" class="btn-choice-place" style="display: none">
+      <ButtonLabel>Central Park</ButtonLabel>
+    </Button>
+    <Button id="btn-place-statue" class="btn-choice-place" style="display: none">
+      <ButtonLabel>Statue</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow-center">
+    <Button id="btn-turn-left" style="display: none">
+      <ButtonLabel>Turn left</ButtonLabel>
+    </Button>
+    <Button id="btn-turn-right" style="display: none">
+      <ButtonLabel>Turn right</ButtonLabel>
+    </Button>
+    <Button id="btn-selfdrive" style="display: none">
+      <ButtonLabel>Drive yourself</ButtonLabel>
+    </Button>
+    <Button id="btn-chittidrive" style="display: none">
+      <ButtonLabel>Let Chitti drive</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow">
+    <!-- BIG left/right arrow buttons (Bhanu 2026-11-17): her picture
+         shows big < > arrows, not small pills. -->
+    <Button id="btn-left" class="btn-big" style="display: none">
+      <ArrowLeft width="20" height="20" color="#ffffff" />
+      <ButtonLabel>LEFT</ButtonLabel>
+    </Button>
+    <Button id="btn-right" class="btn-big" style="display: none">
+      <ArrowRight width="20" height="20" color="#ffffff" />
+      <ButtonLabel>RIGHT</ButtonLabel>
+    </Button>
+    <Button id="btn-pause" style="display: none">
+      <ButtonLabel>Pause</ButtonLabel>
+    </Button>
+    <Button id="btn-resume" style="display: none">
+      <ButtonLabel>Resume</ButtonLabel>
+    </Button>
+    <Button id="btn-stop" style="display: none">
+      <ButtonLabel>Stop</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow">
+    <Button id="btn-where" style="display: none">
+      <ButtonLabel>Where next?</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow-center">
+    <!-- "I'm done" (Bhanu 2026-11-17): the end of the whole tour - she
+         taps it when she has visited enough places and feels done. It
+         shows at a destination and at the left/right choice, never
+         covering Chitti: it lives in the tour panel, which steps right
+         of him out of the car. -->
+    <Button id="btn-im-done" style="display: none">
+      <ButtonLabel>I'm done</ButtonLabel>
+    </Button>
+  </div>
+</Panel>

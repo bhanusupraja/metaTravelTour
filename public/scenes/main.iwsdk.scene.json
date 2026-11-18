@@ -1,0 +1,822 @@
+{
+  "authoring": {
+    "views": [
+      {
+        "fov": 70,
+        "id": "hero",
+        "position": [
+          0.45,
+          1.35,
+          0.35
+        ],
+        "projection": "perspective",
+        "role": "hero",
+        "target": [
+          0.45,
+          1.1,
+          -10
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "exposure": 1.1,
+    "shadows": false,
+    "toneMapping": "aces"
+  },
+  "nodes": [
+    {
+      "content": {
+        "asset": "nyc-city",
+        "type": "asset"
+      },
+      "framingRole": "support",
+      "id": "nyc-city",
+      "name": "New York City"
+    },
+    {
+      "components": {
+        "TourCar": {
+          "speed": 0
+        }
+      },
+      "content": {
+        "asset": "tour-car",
+        "castShadow": true,
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "tour-car",
+      "name": "Tour Car with Chitti"
+    },
+    {
+      "components": {
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "title-panel",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "title-panel",
+      "name": "Title Panel",
+      "transform": {
+        "position": [
+          0.45,
+          1.5,
+          -0.4
+        ],
+        "rotationDeg": [
+          -4,
+          0,
+          0
+        ],
+        "scale": 0.3
+      }
+    },
+    {
+      "components": {
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "tour-panel",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "tour-panel",
+      "name": "Tour Panel",
+      "transform": {
+        "position": [
+          0.1,
+          1.6,
+          -0.85
+        ],
+        "rotationDeg": [
+          -8,
+          -12,
+          0
+        ],
+        "scale": 0.3
+      }
+    },
+    {
+      "content": {
+        "asset": "speech-bubble",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "speech-bubble",
+      "name": "Chitti Speech Bubble",
+      "transform": {
+        "position": [
+          -0.95,
+          1.65,
+          -0.1
+        ],
+        "rotationDeg": [
+          -4,
+          25,
+          0
+        ],
+        "scale": 0.32
+      }
+    },
+    {
+      "components": {
+        "TourState": {
+          "autotest": false,
+          "driving": false,
+          "historyTold": 0,
+          "paused": false,
+          "phase": "enter",
+          "photos": 0,
+          "place": "start",
+          "testResult": ""
+        }
+      },
+      "id": "tour-state",
+      "name": "Tour State"
+    },
+    {
+      "content": {
+        "asset": "souvenir-table",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-table",
+      "name": "Souvenir Table",
+      "transform": {
+        "position": [
+          1.15,
+          0,
+          0.15
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-camera",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-camera",
+      "name": "Souvenir Camera",
+      "transform": {
+        "position": [
+          1.0,
+          0.84,
+          0.02
+        ],
+        "rotationDeg": [
+          0,
+          -20,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-statue",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-statue",
+      "name": "Souvenir Statue",
+      "transform": {
+        "position": [
+          1.32,
+          0.79,
+          0.3
+        ],
+        "rotationDeg": [
+          0,
+          25,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-cup",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-cup",
+      "name": "Souvenir Coffee Cup",
+      "transform": {
+        "position": [
+          1.0,
+          0.79,
+          0.3
+        ],
+        "rotationDeg": [
+          0,
+          15,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-torch",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-torch",
+      "name": "Souvenir Liberty Torch",
+      "transform": {
+        "position": [
+          1.3,
+          0.79,
+          0.0
+        ],
+        "rotationDeg": [
+          0,
+          -15,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-watch",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-watch",
+      "name": "Souvenir Pocket Watch",
+      "transform": {
+        "position": [
+          0.9,
+          0.79,
+          0.12
+        ],
+        "rotationDeg": [
+          0,
+          30,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-polaroid",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-polaroid",
+      "name": "Souvenir Polaroid Photo",
+      "transform": {
+        "position": [
+          1.35,
+          0.79,
+          0.45
+        ],
+        "rotationDeg": [
+          0,
+          -25,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-skyscraper",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-skyscraper",
+      "name": "Souvenir Miniature Skyscraper",
+      "transform": {
+        "position": [
+          1.15,
+          0.79,
+          -0.12
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-bridge",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-bridge",
+      "name": "Souvenir Miniature Brooklyn Bridge",
+      "transform": {
+        "position": [
+          0.85,
+          0.79,
+          0.28
+        ],
+        "rotationDeg": [
+          0,
+          15,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-bouquet",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-bouquet",
+      "name": "Souvenir Flower Bouquet",
+      "transform": {
+        "position": [
+          0.88,
+          0.79,
+          -0.1
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "content": {
+        "asset": "souvenir-ring",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-ring",
+      "name": "Souvenir Ring",
+      "transform": {
+        "position": [
+          1.15,
+          0,
+          0.15
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "DirectionalLight": {
+          "castShadow": false,
+          "color": [
+            1,
+            0.945,
+            0.87,
+            1
+          ],
+          "intensity": 2.3,
+          "shadowBias": -0.0004,
+          "shadowCameraFar": 24,
+          "shadowCameraNear": 2,
+          "shadowCameraSize": 8,
+          "shadowMapSize": "2048",
+          "shadowNormalBias": 0.02,
+          "shadowRadius": 7
+        }
+      },
+      "id": "key-light",
+      "name": "Key Light",
+      "transform": {
+        "position": [
+          -2.3541,
+          11.2763,
+          1.762
+        ],
+        "rotationDeg": [
+          -73.3982,
+          -11.3134,
+          0
+        ]
+      }
+    },
+    {
+      "components": {
+        "HemisphereLight": {
+          "groundColor": [
+            0.592,
+            0.608,
+            0.651,
+            1
+          ],
+          "intensity": 1.15,
+          "skyColor": [
+            0.78,
+            0.83,
+            0.96,
+            1
+          ]
+        }
+      },
+      "id": "fill-light",
+      "name": "Fill Light"
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-wtc",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-wtc",
+      "name": "Souvenir Miniature One World Trade Center",
+      "transform": {
+        "position": [
+          1.05,
+          0.79,
+          0.28
+        ],
+        "rotationDeg": [
+          0,
+          15,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-ball",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-ball",
+      "name": "Souvenir Times Square Ball",
+      "transform": {
+        "position": [
+          1.35,
+          0.79,
+          0.15
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-tree",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-tree",
+      "name": "Souvenir Little Park Tree",
+      "transform": {
+        "position": [
+          1.3,
+          0.79,
+          -0.05
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-train",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-train",
+      "name": "Souvenir Miniature Train",
+      "transform": {
+        "position": [
+          1.0,
+          0.79,
+          0.42
+        ],
+        "rotationDeg": [
+          0,
+          -15,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-boat",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-boat",
+      "name": "Souvenir Little Ferry Boat",
+      "transform": {
+        "position": [
+          0.95,
+          0.79,
+          0.45
+        ],
+        "rotationDeg": [
+          0,
+          20,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-telescope",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-telescope",
+      "name": "Souvenir Miniature Telescope",
+      "transform": {
+        "position": [
+          0.95,
+          0.79,
+          -0.15
+        ],
+        "rotationDeg": [
+          0,
+          10,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-pool",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-pool",
+      "name": "Souvenir Miniature Reflecting Pool",
+      "transform": {
+        "position": [
+          1.3,
+          0.79,
+          0.3
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-plant",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-plant",
+      "name": "Souvenir Potted Flower",
+      "transform": {
+        "position": [
+          1.25,
+          0.79,
+          -0.08
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-statue",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-statue-2",
+      "name": "Souvenir Mini Statue of Liberty 2",
+      "transform": {
+        "position": [
+          0.95,
+          0.79,
+          0.32
+        ],
+        "rotationDeg": [
+          0,
+          -20,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-statue",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-statue-3",
+      "name": "Souvenir Mini Statue of Liberty 3",
+      "transform": {
+        "position": [
+          1.15,
+          0.79,
+          0.32
+        ],
+        "rotationDeg": [
+          0,
+          15,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-statue",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-statue-4",
+      "name": "Souvenir Mini Statue of Liberty 4",
+      "transform": {
+        "position": [
+          1.05,
+          0.79,
+          0.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "components": {
+        "OneHandGrabbable": {},
+        "PokeInteractable": {},
+        "RayInteractable": {}
+      },
+      "content": {
+        "asset": "souvenir-statue",
+        "type": "asset"
+      },
+      "framingRole": "content",
+      "id": "souvenir-statue-5",
+      "name": "Souvenir Mini Statue of Liberty 5",
+      "transform": {
+        "position": [
+          1.25,
+          0.79,
+          0.0
+        ],
+        "rotationDeg": [
+          0,
+          -15,
+          0
+        ],
+        "scale": 1
+      }
+    }
+  ],
+  "player": {
+    "transform": {
+      "position": [
+        0.45,
+        0,
+        0.35
+      ]
+    }
+  },
+  "resources": {},
+  "units": "meters",
+  "version": "iwsdk.scene.v1"
+}

@@ -1,0 +1,64 @@
+<!--
+  Welcome screen: the title "Welcome to Travel Tour" shows alone
+  first; after 2 seconds two glowing boxes appear on the same screen -
+  "Start tutorial" (left) and "Start the game" (right). The panel
+  itself is transparent so Chitti shows through the middle; only the
+  title and the two pill buttons are visible. The boxes start hidden
+  (display: none) and the tour system shows them 2 s after the screen
+  appears. No "Enter the game", no Enter XR step: tapping a box
+  itself starts the XR session.
+  Panel, Button and ButtonLabel come from the bundled Horizon kit.
+-->
+<style>
+  .panel-root {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 440px;
+    background-color: transparent;
+  }
+
+  .title-text {
+    color: #ffffff;
+    font-size: 30px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 18px;
+  }
+
+  .btn-row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: 440px;
+    display: none;
+  }
+
+  .glow-btn {
+    background-color: #f8fafc;
+    border-color: #7dd3fc;
+    border-width: 2px;
+    border-radius: 24px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+
+  .glow-label {
+    color: #0f172a;
+    font-size: 16px;
+    font-weight: 600;
+  }
+</style>
+<Panel id="title-root" class="panel-root">
+  <div id="title-text" class="title-text">Welcome to Travel Tour</div>
+  <div id="enter-buttons" class="btn-row">
+    <Button id="btn-start-tutorial" class="glow-btn">
+      <ButtonLabel class="glow-label">Start tutorial</ButtonLabel>
+    </Button>
+    <Button id="btn-start-game" class="glow-btn">
+      <ButtonLabel class="glow-label">Start the game</ButtonLabel>
+    </Button>
+  </div>
+</Panel>
