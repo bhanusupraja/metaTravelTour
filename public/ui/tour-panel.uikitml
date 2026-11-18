@@ -94,7 +94,7 @@
 </style>
 <Panel id="tour-root" class="panel-root">
   <div class="panel-content">
-    <div id="tour-sub" class="eyebrow">MILO</div>
+    <div id="tour-sub" class="eyebrow">TRAVEL TOUR</div>
     <div id="tour-line" class="line">Welcome!</div>
   </div>
   <div class="btnrow">
@@ -148,6 +148,15 @@
     <Button id="btn-send-journal" style="display: none">
       <ButtonLabel>Send to Journal</ButtonLabel>
     </Button>
+    <!-- Hold-to-confirm (Bhanu 2026-11-18 07:25): after she holds a
+         souvenir for 2 seconds Milo asks first - Yes sends it to the
+         Journal, No keeps it in her hand -->
+    <Button id="btn-journal-yes" style="display: none">
+      <ButtonLabel>Yes</ButtonLabel>
+    </Button>
+    <Button id="btn-journal-no" style="display: none">
+      <ButtonLabel>No</ButtonLabel>
+    </Button>
     <Button id="btn-journal-close" style="display: none">
       <ButtonLabel>Close Journal</ButtonLabel>
     </Button>
@@ -162,6 +171,17 @@
     </Button>
     <Button id="btn-journal-close-photo" style="display: none">
       <ButtonLabel>Close photo</ButtonLabel>
+    </Button>
+  </div>
+  <div class="btnrow-center">
+    <!-- Seat height (Bhanu 2026-11-18): her seated eye height is low
+         on the Quest - Seat up / Seat down nudges it a little per tap,
+         in the car and on foot. -->
+    <Button id="btn-seat-down" style="display: none">
+      <ButtonLabel>Seat down</ButtonLabel>
+    </Button>
+    <Button id="btn-seat-up" style="display: none">
+      <ButtonLabel>Seat up</ButtonLabel>
     </Button>
   </div>
   <div class="btnrow-center">

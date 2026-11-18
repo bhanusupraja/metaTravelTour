@@ -37,7 +37,9 @@
  *   of Liberty, a New York coffee cup, a mini Liberty torch. She grabs
  *   one with her hand (pinch) and places it anywhere she likes; in the
  *   photo moment the grab holds it for the photo.
- *   After the photo, Milo says thank you - that closes the visit.
+ *   After a photo, Milo asks if she wants another one - she can take
+   2-3 photos at one place, and the visit only ends when she says so
+   (I'm done / take me... / Where next?), never after a single photo.
  * - Only AFTER the visit ends (photos + thank-you) does the left/right
  *   choice appear: Milo suggests a nearby place first ("let's go left
  *   / let's go right") with a small hint showing which hand movement
@@ -63,6 +65,7 @@ import {
   BoxGeometry,
   BufferGeometry,
   CircleGeometry,
+  CanvasTexture,
   ConeGeometry,
   DirectionalLight,
   DoubleSide,
@@ -81,12 +84,14 @@ import {
   Pressed,
   Quaternion,
   Raycaster,
+  RingGeometry,
   SRGBColorSpace,
   Texture,
   TorusGeometry,
   UIKitMLAsset,
   Vector2,
   Vector3,
+  WebGLRenderTarget,
   createSystem,
   type Entity,
 } from '@iwsdk/core';
@@ -94,11 +99,19 @@ import { TourCar, TourState } from './tour-component.js';
 import type { Model as VoskModel, KaldiRecognizer as VoskRecognizer } from 'vosk-browser';
 
 // ---------- scripted lines (verified facts only, unchanged from v1.5) ----------
-// The tutorial intro: Milo introduces himself and explains the rules,
-// 10-20 seconds total. One short line per intro screen; the panel rotates
-// through them (5 s each) and each line is spoken as it appears, so the
-// speech bubble beside him is the live transcript of what he is saying.
-const INTRO_MS = 19000; // the intro runs ~19 seconds, then Skip / Restart appear
+// The tutorial intro: Milo introduces himself and explains the rules.
+// One short line per intro screen; the panel rotates through them and
+// each line is spoken as it appears, so the speech bubble beside him is
+// the live transcript of what he is saying. The whole intro is ONE
+// continuous take for recording (Bhanu 2026-11-18): start recording,
+// tap Start tutorial, and all 4 lines play back-to-back with no long
+// gaps and no stop/restart in the middle. The dwell per line is matched
+// to the recorded clips (measured with ffprobe/silencedetect: speech
+// ends ~2.92 / 2.52 / 3.00 / 3.09 s into intro-1..4.mp3) plus a breath,
+// so no word is ever cut off by the next line and there is no dead time
+// where a recorder would think it is done. Total ~12.1 s.
+const INTRO_LINE_MS = [3070, 2670, 3150, 3240];
+const INTRO_MS = INTRO_LINE_MS.reduce((a, b) => a + b, 0); // ~12.1 s total
 const INTRO_LINES = [
   "Hi, my name is Milo, I'll tell you how to play this game.",
   'Tell me any place, and I\'ll show you all of New York.',
@@ -118,14 +131,27 @@ const NEXT_PLACES_LINE =
 // a voice clip). The mockup line: grab it, hold it, or send it to her
 // tour Journal (the glowing ring).
 const GRAB_NICE_LINE = 'Nice grab! Hold it or send it to your journal!';
-// car seat (Bhanu 2026-11-17 22:18): her seated eye height on the Quest
-// is ~1.05 m; Milo's eyes are at 1.26 m. While she is in the car the
-// rig lifts her eyes to SEAT_EYE_TARGET, at most SEAT_BOOST_MAX.
-const SEAT_EYE_TARGET = 1.32;
+// car seat (Bhanu 2026-11-17 22:18, raised again 2026-11-18): her
+// seated eye height on the Quest is ~1.05 m; Milo's eyes are at 1.26 m.
+// While she is in the game the rig lifts her eyes to SEAT_EYE_TARGET,
+// at most SEAT_BOOST_MAX. 1.32 m still left her looking up at him on
+// the real Quest, so the target is 1.42 m now - his face sits just
+// below her eye level, never towering over her. She can also nudge it
+// herself with the Seat up / Seat down buttons (SEAT_STEP per tap),
+// clamped to SEAT_MIN..SEAT_MAX, in the car and on foot alike.
+const SEAT_EYE_TARGET = 1.42;
 const SEAT_BOOST_MAX = 0.5;
+const SEAT_MIN = 1.15;
+const SEAT_MAX = 1.6;
+const SEAT_STEP = 0.05;
 // Journal ring catch (Bhanu 2026-11-17 22:18): letting go within this
 // distance of the ring sends the souvenir to the Journal.
 const JOURNAL_RING_CATCH = 0.75;
+// Hold-to-confirm Journal send (Bhanu 2026-11-18 07:25): after she
+// grabs a souvenir and HOLDS it this long, Milo asks "Send this to
+// the Journal?" - Yes sends it along the glowing arc, No keeps it in
+// her hand (and the question is not asked again for that hold).
+const HOLD_CONFIRM_MS = 2000;
 // background music (Bhanu 2026-11-17 22:36, her pick 23:16): a SOFT
 // PIANO MUSIC-BOX LOOP - gentle, warm, a little magical, like a
 // lullaby; slow and light, major key, quiet underneath Milo's voice.
@@ -144,6 +170,9 @@ const MUSIC_MELODY: number[] = [
   659.25, 0, 783.99, 0, 880.0, 0, 783.99, 0,
   659.25, 0, 587.33, 0, 523.25, 0, 587.33, 0,
 ];
+// Master music volume (Bhanu 2026-11-18: 0.12 was a bit loud on her
+// phone - 0.08 keeps the loop clearly audible, just softer under Milo)
+const MUSIC_GAIN = 0.08;
 const PLACED_LINE = 'Nice - you put it there! Grab it again any time.';
 // Self-drive (Bhanu 2026-11-16 22:01): she sits LEFT in the driver seat
 // and Milo sits on her RIGHT in the passenger seat, chatting and
@@ -161,6 +190,12 @@ const TURN_RIGHT_LINE = 'Turning right!';
 // Journal (Bhanu 2026-11-16 22:06): her personal travel scrapbook -
 // saved souvenirs and photos she can open and look through any time.
 const JOURNAL_SAVED_LINE = 'Saved to your Journal! You can look at it any time.';
+// After a photo (Bhanu 2026-11-18): stay at the destination in photo
+// mode, so she can take 2-3 photos at one place. Milo asks for another
+// one instead of jumping to "left or right" - the visit only ends when
+// she says so (I'm done / take me... / Where next?).
+const PHOTO_AGAIN_LINE =
+  "Nice one! Want another photo? Tap Photo for another one - or say I'm done when you're ready to move on.";
 const JOURNAL_OPEN_LINE = 'Here is your Journal - everything you saved on this tour!';
 // The visit close (Bhanu 2026-11-17): the old line was backwards -
 // Milo took HER there, so she thanks him, not the other way round.
@@ -566,6 +601,10 @@ const VOSK_GRAMMAR = JSON.stringify([
   'famous',
   'photo',
   'picture',
+  'another photo',
+  'one more photo',
+  'take another photo',
+  'cheese',
   'next place',
   'where next',
   'paris',
@@ -574,6 +613,8 @@ const VOSK_GRAMMAR = JSON.stringify([
   'thank you',
   'thank you milo',
   'thanks milo',
+  'yes',
+  'no',
 ]);
 
 // Story cards: one short line per panel screen (fix d - no big blocks).
@@ -895,6 +936,12 @@ export class TourSystem extends createSystem({
   private introStartMs = 0;
   private introEndMs = 0;
   private introLineIdx = 0;
+  // tutorial line retry (Bhanu 2026-11-18): a line's clip is played from
+  // the update loop (a timer, not a tap), and a phone browser can refuse
+  // play() there - retry it, then fall back to the browser voice
+  private introLineSpokenAtMs = 0;
+  private introLineRetryAtMs = 0;
+  private introLineFallbackDone = false;
 
   // --- ride start (no gesture any more) + passenger seat ---
   // She names a place, Milo gets in beside her, and she taps the
@@ -996,6 +1043,20 @@ export class TourSystem extends createSystem({
   private souvenirTable: Object3D | null = null;
   private souvenirRingObj: Object3D | null = null;
   private heldObject: string | null = null;
+  // --- hold-to-confirm Journal send (Bhanu 2026-11-18 07:25) ---
+  // the 2-second hold starts when she grabs a souvenir at a
+  // destination; when it runs out Milo asks first, so nothing ever
+  // leaves her hand without her saying so
+  private holdStartMs: number | null = null;
+  private holdConfirmShown = false;
+  // "No" means not now: don't ask again until she grabs it again
+  private holdConfirmDeclined = false;
+  // the visible hold-progress ring around the held souvenir: a faint
+  // full ring + a bright arc that fills as the 2 seconds run out, so
+  // she SEES the countdown and the question never surprises her
+  private holdRing: Group | null = null;
+  private holdRingProgressGeo: RingGeometry | null = null;
+  private tmpHoldPos = new Vector3();
   private photoObject: string | null = null;
   // true from the moment a photo countdown starts until the thank-you
   // closes the visit: one grab (or one double-tap) takes exactly one photo
@@ -1025,8 +1086,8 @@ export class TourSystem extends createSystem({
   // Her personal travel scrapbook: souvenirs she sends to the glowing
   // ring, and photos she takes, saved so she can open the Journal and
   // look through them any time. Entries are {kind, name, place} plus
-  // the souvenir id (to show its 3D object on its page) and the photo
-  // image (its PNG data URL, so a photo page can open BIG).
+  // the souvenir id (to draw its flat pictogram on its page) and the
+  // photo image (its PNG data URL, so a photo page can open BIG).
   // The Journal is a BOOK (Bhanu 2026-11-17): one keepsake per page,
   // Next / Previous to turn the pages, and a photo page opens big.
   private journal: Array<{
@@ -1043,6 +1104,29 @@ export class TourSystem extends createSystem({
   // whichever photo page she opens (its texture is swapped per photo)
   private photoPlane: Mesh | null = null;
   private photoPlaneTex: Texture | null = null;
+  // the welcome screen's thumbnail backdrop (Bhanu 2026-11-18): her
+  // TRAVEL TOUR thumbnail (Milo in Times Square at night) as the first
+  // screen, with the title and the two buttons on top, centred. One
+  // plane, head-locked with the title panel, visible only on the
+  // Welcome screen (enter phase). The image loads from public/images
+  // (same pattern as the voice clips in public/audio); until it loads
+  // the plane stays dark and the plain title shows instead.
+  private welcomeBg: Mesh | null = null;
+  private welcomeBgImg: HTMLImageElement | null = null;
+  // true while the panel title is hidden because the thumbnail
+  // already carries the TRAVEL TOUR title - the buttons sit lower,
+  // over the street in the picture, instead of over Milo's face
+  private welcomeTitleHidden = false;
+  // the Journal page's FLAT picture card (Bhanu 2026-11-18): a keepsake
+  // pasted on the page, not the 3D model floating in the book. One
+  // plane, reused per page: its canvas texture is redrawn for each
+  // entry - a drawn 2D pictogram + name + place for a souvenir, the
+  // actual photo pasted on the card for a photo page.
+  private journalCard: Mesh | null = null;
+  private journalCardTex: CanvasTexture | null = null;
+  private journalCardCanvas: HTMLCanvasElement | null = null;
+  private journalCardPhotoImg: HTMLImageElement | null = null;
+  private journalCardPhotoFor: string | null = null;
   // the big-photo Image is kept here (not a local) so it is not
   // garbage-collected before its onload fires - a local Image that
   // loads a large data URL can be collected mid-load and the plane
@@ -1091,6 +1175,11 @@ export class TourSystem extends createSystem({
   // eased in and out so the view never jumps.
   private seatBoost = 0;
   private seatBoostTarget = 0;
+  // her own seat nudge (Bhanu 2026-11-18): Seat up / Seat down moves
+  // the eye-height target by SEAT_STEP per tap, clamped so the
+  // effective target stays in SEAT_MIN..SEAT_MAX. Persists for the
+  // session, in the car and on foot.
+  private seatAdjust = 0;
   private debugHeadY: number | null = null;
   // --- photo / selfie (Bhanu 2026-11-17 22:27) ---
   // 'photo' = the place as now; 'selfie' = Milo comes close beside
@@ -1098,6 +1187,18 @@ export class TourSystem extends createSystem({
   // headset cannot photograph her real face, so the selfie is with
   // Milo). The mode stays until she toggles it back.
   private photoMode: 'photo' | 'selfie' = 'photo';
+  // photos taken at the CURRENT destination (Bhanu 2026-11-18): the
+  // Photo button reads "Another photo" once she has one here, and the
+  // count resets on every arrival, so each visit starts fresh.
+  private photosAtPlace = 0;
+  // XR photo capture (Bhanu 2026-11-18): the offscreen render target
+  // the photo is rendered into, the pixel buffer it is read back
+  // through, and the proof the last capture really produced an image
+  // (data URL length + pixel variance - a blank frame has none).
+  private captureTarget: WebGLRenderTarget | null = null;
+  private captureBuffer: Uint8Array | null = null;
+  private lastCaptureBytes = 0;
+  private lastCaptureVariance = 0;
   // --- background music (Bhanu 2026-11-17 22:36) ---
   // an original loop, made in code with the Web Audio API - no audio
   // file, no copyrighted track. Light and gentle, quiet under Milo's
@@ -1392,6 +1493,32 @@ export class TourSystem extends createSystem({
     this.world.scene.add(ringGroup);
     this.journalRing = ringGroup;
 
+    // hold-progress ring (Bhanu 2026-11-18 07:25): a faint full ring
+    // around the held souvenir, with a bright arc that fills over the
+    // 2-second hold - she SEES the countdown, so the question never
+    // surprises her. A child of the scene, repositioned every frame to
+    // the held object and turned to face her; hidden until she holds
+    // something at a destination.
+    const holdGroup = new Group();
+    holdGroup.name = 'hold-ring';
+    const holdBg = new Mesh(
+      new RingGeometry(0.1, 0.125, 48),
+      new MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.25, side: DoubleSide }),
+    );
+    holdGroup.add(holdBg);
+    const holdGeo = new RingGeometry(0.1, 0.125, 48);
+    const holdProg = new Mesh(
+      holdGeo,
+      new MeshBasicMaterial({ color: 0xf5d90a, transparent: true, opacity: 0.95, side: DoubleSide }),
+    );
+    holdProg.name = 'hold-ring-progress';
+    holdGeo.setDrawRange(0, 0);
+    holdGroup.add(holdProg);
+    holdGroup.visible = false;
+    this.world.scene.add(holdGroup);
+    this.holdRing = holdGroup;
+    this.holdRingProgressGeo = holdGeo;
+
     // glowing arc (Bhanu 2026-11-16 22:01): a cyan line from a held
     // souvenir to the Journal ring, showing the toss path. A child of
     // the souvenir table (world-fixed); its points are rewritten in
@@ -1421,12 +1548,60 @@ export class TourSystem extends createSystem({
     // each time it opens).
     const photoPlane = new Mesh(
       new PlaneGeometry(1.1, 0.8),
-      new MeshBasicMaterial({ color: 0x111827 }),
+      new MeshBasicMaterial({ color: 0x111827, depthTest: false }),
     );
     photoPlane.name = 'journal-photo-plane';
     photoPlane.visible = false;
+    photoPlane.renderOrder = 998;
     this.world.scene.add(photoPlane);
     this.photoPlane = photoPlane;
+
+    // the Journal page's FLAT picture card (Bhanu 2026-11-18): a
+    // keepsake pasted on the page, not the 3D model in the book. One
+    // plane with a canvas texture, redrawn per page (see
+    // drawJournalCard) - depthTest off so scenery can never cover it,
+    // like the photo plane.
+    const cardCanvas = document.createElement('canvas');
+    cardCanvas.width = 512;
+    cardCanvas.height = 640;
+    const cardTex = new CanvasTexture(cardCanvas);
+    cardTex.colorSpace = SRGBColorSpace;
+    const cardMat = new MeshBasicMaterial({ map: cardTex, depthTest: false });
+    const journalCard = new Mesh(new PlaneGeometry(0.62, 0.78), cardMat);
+    journalCard.name = 'journal-card';
+    journalCard.visible = false;
+    journalCard.renderOrder = 998;
+    this.world.scene.add(journalCard);
+    this.journalCard = journalCard;
+    this.journalCardTex = cardTex;
+    this.journalCardCanvas = cardCanvas;
+
+    // the welcome screen's thumbnail backdrop (Bhanu 2026-11-18): her
+    // TRAVEL TOUR thumbnail as the first screen - 16:9, like a cinema
+    // screen a metre ahead, with the title and the two buttons on top.
+    // DepthTest off so nothing in the void can cover it; it draws just
+    // under the title panel (renderOrder 997 vs the panel's 999).
+    const welcomeBgMat = new MeshBasicMaterial({ color: 0x0b1020, depthTest: false });
+    const welcomeBg = new Mesh(new PlaneGeometry(1.6, 0.9), welcomeBgMat);
+    welcomeBg.name = 'welcome-thumbnail';
+    welcomeBg.visible = false;
+    welcomeBg.renderOrder = 997;
+    this.world.scene.add(welcomeBg);
+    this.welcomeBg = welcomeBg;
+    const thumbImg = new Image();
+    this.welcomeBgImg = thumbImg;
+    thumbImg.onload = () => {
+      const tex = new Texture(thumbImg);
+      tex.colorSpace = SRGBColorSpace;
+      tex.needsUpdate = true;
+      welcomeBgMat.map = tex;
+      welcomeBgMat.color.set(0xffffff);
+      welcomeBgMat.needsUpdate = true;
+      // the picture is here now: re-aim the welcome screen at once,
+      // so the title hides and the buttons drop to the street
+      this.placePanelsInFront();
+    };
+    thumbImg.src = `${import.meta.env.BASE_URL}images/travel-tour-thumbnail.jpg`;
 
     // UI panels
     this.titlePanel =
@@ -1459,6 +1634,8 @@ export class TourSystem extends createSystem({
       'btn-milodrive': () => this.handBackToMilo(),
       'btn-journal': () => this.openJournal(),
       'btn-send-journal': () => this.sendHeldToJournal(),
+      'btn-journal-yes': () => this.confirmJournalYes(),
+      'btn-journal-no': () => this.confirmJournalNo(),
       'btn-journal-close': () => this.closeJournal(),
       'btn-thank-milo': () => this.sayThankYouBack(),
       'btn-journal-prev': () => this.journalPrev(),
@@ -1471,6 +1648,8 @@ export class TourSystem extends createSystem({
       'btn-history': () => this.onHistoryButton(),
       'btn-photo': () => this.takePhoto(),
       'btn-selfie': () => this.togglePhotoMode(),
+      'btn-seat-up': () => this.adjustSeat(SEAT_STEP),
+      'btn-seat-down': () => this.adjustSeat(-SEAT_STEP),
       'btn-music': () => this.toggleMusic(),
       'btn-mic': () => this.toggleListening(),
       'btn-where': () => this.finishVisit(),
@@ -1478,6 +1657,15 @@ export class TourSystem extends createSystem({
     });
     // (No Enter XR step: tapping either Welcome box starts the XR
     // session itself - see ensureXR().)
+
+    // panels in front, always (Bhanu 2026-11-18): the tour panel, the
+    // Welcome title and the speech bubble are re-aimed at her head
+    // every frame (see update), AND their materials ignore depth, so a
+    // tree or a building can never paint over them - in Central Park
+    // the canopy covered the panel in her video. The Journal ring and
+    // the hold ring get the same treatment.
+    this.makeUnoccludable(this.journalRing);
+    this.makeUnoccludable(this.holdRing);
 
     // any press on the page (mouse / touch, even one that misses a
     // button) unlocks audio, so Milo's voice can play afterwards
@@ -1514,6 +1702,36 @@ export class TourSystem extends createSystem({
     (window as unknown as { __tourHandle: (h: string) => void }).__tourHandle = (
       h: string,
     ) => this.handleCommand(h);
+    // debug hooks for the screenshot scripts (same shape as
+    // __tourHandle): drive a grab / release / hold-elapsed from the
+    // page, so a picture can prove the hold-to-confirm flow
+    (window as unknown as { __tourGrab: (id: string) => void }).__tourGrab = (id: string) =>
+      this.simulateGrab(id);
+    (window as unknown as { __tourRelease: (id: string) => void }).__tourRelease = (id: string) =>
+      this.simulateRelease(id);
+    (window as unknown as { __tourHoldElapsed: () => void }).__tourHoldElapsed = () =>
+      this.simulateHoldElapsed();
+    // debug hook: click a UIKit button by id — same route as the
+    // autotest's clickBtn (dispatch on the UIKit element, else call
+    // the wired handler directly). The UIKit panels are 3D scene
+    // objects, not DOM, so screenshot scripts cannot query them.
+    (window as unknown as { __tourClick: (id: string) => boolean }).__tourClick = (id: string) => {
+      const el = this.els[id] as unknown as { dispatchEvent?: unknown } | null;
+      if (el && typeof el.dispatchEvent === 'function') {
+        try {
+          (el as { dispatchEvent: (e: Event) => unknown }).dispatchEvent(new Event('click'));
+          return true;
+        } catch {
+          // fall through to the wired handler
+        }
+      }
+      const h = this.buttonHandlers[id];
+      if (h) {
+        h();
+        return true;
+      }
+      return false;
+    };
     // Raycast probe for naming a stray object in the frame (Bhanu
     // 2026-11-17: a gold bar crossed Milo's face in two pictures).
     // Call window.__tourRaycast(nx, ny) with normalised screen coords
@@ -1585,7 +1803,7 @@ export class TourSystem extends createSystem({
     // text elements (no click handler) + the two mic icons (toggled by
     // updateMicButton - the Meet-style mic button has no label any more)
     // + the Welcome boxes row (hidden for the first 2 s of the screen)
-    ['tour-line', 'tour-sub', 'title-root', 'tour-root', 'enter-buttons', 'btn-next-label', 'btn-photo-label', 'btn-selfie-label', 'btn-music-label', 'btn-mic-icon-on', 'btn-mic-icon-off', 'bubble-text'].forEach((id) => {
+    ['tour-line', 'tour-sub', 'title-root', 'tour-root', 'title-text', 'enter-buttons', 'btn-next-label', 'btn-photo-label', 'btn-selfie-label', 'btn-music-label', 'btn-mic-icon-on', 'btn-mic-icon-off', 'bubble-text'].forEach((id) => {
       const el = panel.getElementById(id) as unknown as UiEl | null;
       if (el) this.els[id] = el;
     });
@@ -1649,6 +1867,14 @@ export class TourSystem extends createSystem({
       this.journalOpen = false;
       this.hidePhotoPlane();
       this.hideJournalGallery();
+    }
+    // leaving a destination ends any hold: the question closes and
+    // the ring goes away (she is not holding it there any more)
+    if (phase !== 'arrived') {
+      this.holdStartMs = null;
+      this.holdConfirmShown = false;
+      this.holdConfirmDeclined = false;
+      if (this.holdRing) this.holdRing.visible = false;
     }
     // The souvenir table appears ONLY at a destination - arrived,
     // photopick, story, thankyou, next - and nowhere else (Bhanu
@@ -1719,12 +1945,59 @@ export class TourSystem extends createSystem({
   }
 
   /**
+   * Callback for makeUnoccludable's traverse - a class field, so the
+   * per-frame re-application in placePanelsInFront allocates nothing.
+   */
+  private unoccludableCb = (o: Object3D): void => {
+    const mesh = o as Mesh;
+    const mat = (mesh as unknown as { material?: unknown }).material;
+    if (!mat) return;
+    if (Array.isArray(mat)) {
+      for (let i = 0; i < mat.length; i++) this.unoccludableMat(mat[i]);
+    } else {
+      this.unoccludableMat(mat);
+    }
+    mesh.renderOrder = 999;
+  };
+
+  private unoccludableMat(m: unknown): void {
+    const mm = m as { depthTest?: boolean; needsUpdate?: boolean };
+    if (mm && mm.depthTest !== false) {
+      mm.depthTest = false;
+      mm.needsUpdate = true;
+    }
+  };
+
+  /**
+   * Make everything under `root` draw on top of the scenery: no depth
+   * test, late render order. Only for UI / near-her helpers (panels,
+   * rings) - never for the city, the car or Milo, or they would show
+   * through walls. UIKitML panels keep their own internal draw order
+   * (one shared renderOrder, so three.js falls back to their z-offsets
+   * inside the panel), which the screenshots verify. Idempotent: a
+   * material that already ignores depth is left alone, so calling this
+   * every frame costs a traverse and no shader re-uploads - and it
+   * catches panel materials UIKitML builds lazily, after init.
+   */
+  private makeUnoccludable(root: Object3D | null): void {
+    if (!root) return;
+    root.traverse(this.unoccludableCb);
+  }
+
+  /**
    * Put both panels in front of her, within arm's reach, facing her.
    * The authored spots are 1.4-1.75 m away - too far to poke on a real
    * Quest - and they sit in fixed world space, so if she enters XR facing
    * another way they end up behind her. This re-aims them at her real head.
    */
   private placePanelsInFront(): void {
+    // re-apply every frame (Bhanu 2026-11-18): UIKitML builds some
+    // panel materials lazily, after init - a one-time pass misses them,
+    // and a tree could then paint over the panel. Idempotent (see
+    // makeUnoccludable), so this is just a traverse once set.
+    this.makeUnoccludable(this.titlePanel);
+    this.makeUnoccludable(this.tourPanel);
+    this.makeUnoccludable(this.speechBubble);
     const head = this.headPos();
     const fwd = this.headLookDir(this.tmpFwd);
     // her right (fwd x up): for fwd (0,0,-1) this is (1,0,0)
@@ -1741,19 +2014,49 @@ export class TourSystem extends createSystem({
     // the eye-level band the autotest allows (|dy| < 0.15); headPos()
     // already falls back to a sane 1.5 m head in the flat simulator,
     // so no separate clamp is needed here.
+    // the welcome backdrop (Bhanu 2026-11-18): the thumbnail IS the
+    // first screen, so it sits centred straight ahead at eye level, a
+    // touch behind the title panel (1.0 m vs 0.9 m). Only on the
+    // Welcome screen. The thumbnail already says TRAVEL TOUR, so the
+    // panel's own title hides once the picture loads, and the panel
+    // drops so the two buttons sit over the street in the picture -
+    // dark ground, readable white pills - instead of over Milo's face.
+    const thumbReady =
+      this.phase === 'enter' &&
+      !!this.welcomeBgImg?.complete &&
+      (this.welcomeBg?.material as MeshBasicMaterial | undefined)?.map != null;
+    if (thumbReady !== this.welcomeTitleHidden) {
+      this.welcomeTitleHidden = thumbReady;
+      this.setEl('title-text', { display: thumbReady ? 'none' : 'flex' });
+    }
+    if (this.welcomeBg) {
+      this.welcomeBg.visible = this.phase === 'enter';
+      if (this.welcomeBg.visible) {
+        this.welcomeBg.position.set(
+          head.x + fwd.x * 1.0,
+          head.y + 0.1,
+          head.z + fwd.z * 1.0,
+        );
+        this.welcomeBg.rotation.set(-0.07, yaw, 0);
+      }
+    }
     if (this.titlePanel) {
       this.titlePanel.position.set(
         head.x + fwd.x * 0.9,
-        head.y + 0.1,
+        head.y + (thumbReady ? -0.28 : 0.1),
         head.z + fwd.z * 0.9,
       );
       this.titlePanel.rotation.set(-0.07, yaw, 0);
       this.titlePanel.scale.setScalar(0.3);
     }
-    // tour: 0.85 m ahead, at EYE LEVEL and a touch to her right, so she
-    // can see it and tap it from the passenger seat without looking down.
-    // (At 0.3 m right the 1.2 m panel ran off the right edge of the view;
-    // 0.1 m keeps every button inside it.)
+    // tour: farther, bigger, higher (Bhanu 2026-11-18: screens a
+    // little farther away AND bigger, AND higher up): 1.05 m ahead out
+    // of the car (1.0 m in it), raised to head.y + 0.08, and scaled
+    // 0.18 out / 0.26 in (0.72 m / 1.04 m wide) so it reads bigger
+    // even from the extra distance. Still a touch to her right, so she
+    // can see it and tap it from the passenger seat without looking
+    // down. (At 0.3 m right the 1.2 m panel ran off the right edge of
+    // the view; 0.1 m keeps every button inside it.)
     // OUT OF THE CAR Milo stands directly in front of her, so the
     // panel steps to her right - otherwise the 1.2 m panel hides his
     // face. In the car he is on her left and the panel stays centred.
@@ -1761,12 +2064,10 @@ export class TourSystem extends createSystem({
     // destination, and at the first place choice, where he stands in
     // front of her talking; the phase list is the backstop.)
     // The step is sized to her Screen_4 picture: the panel sits right
-    // of Milo with his whole face clear. At 0.9 m ahead and 0.52 m
-    // right, scaled to 0.14 (0.56 m wide), its left edge is at ~15° off
+    // of Milo with his whole face clear. At 1.05 m ahead and 0.52 m
+    // right, scaled to 0.18 (0.72 m wide), its left edge is at ~13° off
     // her forward - clear of his head's right edge (~11°) - and its
-    // right edge at ~42° is comfortably inside the view (at 0.8/0.55
-    // the right edge sat at ~47°, and any head turn clipped it off the
-    // emulator's edge). The old 0.3 m step left the panel over his face.
+    // right edge at ~40° is comfortably inside the view.
     const outOfCar =
       this.miloOut ||
       [
@@ -1779,22 +2080,31 @@ export class TourSystem extends createSystem({
         'next',
         'goodbye',
       ].includes(this.phase);
-    const tourFwd = outOfCar ? 0.9 : 0.85;
-    const tourRight = outOfCar ? 0.52 : 0.2;
+    const tourFwd = outOfCar ? 1.05 : 1.0;
+    // tutorial controls sit closer to centre (Bhanu 2026-11-18): at
+    // 0.52 m right she had to turn her head to find Skip. Milo stands
+    // further back now (2.2 m), so his face is narrower on her view
+    // and 0.35 m still clears it - Skip is straight ahead with him.
+    const tourRight =
+      this.phase === 'tutorial' || this.phase === 'tutdone'
+        ? 0.35
+        : outOfCar
+          ? 0.52
+          : 0.2;
     // the Journal opens CLOSE to her (Bhanu 2026-11-17 22:18: "the
     // Journal should not be too far away, it should be close to me"):
-    // while the book is open the panel steps in to 0.75 m ahead, 0.35 m
-    // right (~0.83 m from her head), within easy reach
-    const journalFwd = this.journalOpen ? 0.75 : tourFwd;
+    // while the book is open the panel steps in to 0.9 m ahead, 0.35 m
+    // right (~0.97 m from her head), within easy reach
+    const journalFwd = this.journalOpen ? 0.9 : tourFwd;
     const journalRight = this.journalOpen ? 0.35 : tourRight;
-    // in-car the panel is 0.22 (0.88 m wide) and stepped right, so it
+    // in-car the panel is 0.26 (1.04 m wide) and stepped right, so it
     // does not cover Milo driving on her left or the road ahead -
     // at 0.3 it filled the frame during the drive and hid him entirely
-    const tourScale = outOfCar ? 0.14 : 0.22;
+    const tourScale = outOfCar ? 0.18 : 0.26;
     if (this.tourPanel) {
       this.tourPanel.position.set(
         head.x + fwd.x * journalFwd + right.x * journalRight,
-        head.y,
+        head.y + 0.08,
         head.z + fwd.z * journalFwd + right.z * journalRight,
       );
       this.tourPanel.rotation.set(-0.07, yaw, 0);
@@ -1808,6 +2118,9 @@ export class TourSystem extends createSystem({
    * (It used to sit beside Milo's head - 1.3 m to her left, almost
    * outside her view, so the words ran off the left edge. It is also
    * shrunk a little: at its old scale it was about a metre wide.)
+   * Farther, bigger, higher too (Bhanu 2026-11-18): 1.05 m ahead,
+   * head.y + 0.55, scale 0.26 - the one Milo-talking screen, easy to
+   * read without leaning in.
    */
   private positionBubble(): void {
     if (!this.speechBubble || !this.speechBubble.visible) return;
@@ -1816,13 +2129,13 @@ export class TourSystem extends createSystem({
     // the bubble must stay in front of her, above Milo, not off to one
     // side
     const fwd = this.headLookDir(this.tmpFwd);
-    const bx = head.x + fwd.x * 0.9;
-    const by = head.y + 0.45;
-    const bz = head.z + fwd.z * 0.9;
+    const bx = head.x + fwd.x * 1.05;
+    const by = head.y + 0.55;
+    const bz = head.z + fwd.z * 1.05;
     const yaw = Math.atan2(head.x - bx, head.z - bz);
     this.speechBubble.position.set(bx, by, bz);
     this.speechBubble.rotation.set(0, yaw, 0);
-    this.speechBubble.scale.setScalar(0.22);
+    this.speechBubble.scale.setScalar(0.26);
   }
 
   /** One panel, one thing: show exactly the line + buttons for this phase. */
@@ -1843,10 +2156,11 @@ export class TourSystem extends createSystem({
     const all = [
       'btn-next', 'btn-skip', 'btn-restart', 'btn-back', 'btn-place-times', 'btn-place-park',
       'btn-place-statue', 'btn-left', 'btn-right', 'btn-pause', 'btn-resume',
-      'btn-stop', 'btn-history', 'btn-photo', 'btn-selfie', 'btn-music', 'btn-mic',
+      'btn-stop', 'btn-history', 'btn-photo', 'btn-selfie', 'btn-seat-up', 'btn-seat-down',
+      'btn-music', 'btn-mic',
       'btn-where', 'btn-start-ride',
       'btn-turn-left', 'btn-turn-right', 'btn-selfdrive', 'btn-milodrive',
-      'btn-journal', 'btn-send-journal', 'btn-journal-close', 'btn-im-done',
+      'btn-journal', 'btn-send-journal', 'btn-journal-yes', 'btn-journal-no', 'btn-journal-close', 'btn-im-done',
       'btn-thank-milo', 'btn-journal-prev', 'btn-journal-next',
       'btn-journal-open-photo', 'btn-journal-close-photo',
     ];
@@ -1857,7 +2171,15 @@ export class TourSystem extends createSystem({
     };
 
     if (p === 'tutorial') {
-      this.setLine(INTRO_LINES[this.introLineIdx], 'MILO IS TALKING');
+      // "MILO IS TALKING" used to sit here as the panel eyebrow while
+      // the bubble beside him said "MILO SAYS" - the same attribution
+      // twice (Bhanu 2026-11-18). The bubble owns "MILO SAYS"; the
+      // panel eyebrow is just the phase name now.
+      this.setLine(INTRO_LINES[this.introLineIdx], 'TUTORIAL');
+      // Skip is visible from line 1 (Bhanu 2026-11-18): she records the
+      // tutorial in one take, and Skip must be there the whole time -
+      // not only on the done screen. Restart stays on the done screen.
+      show('btn-skip');
     } else if (p === 'tutdone') {
       this.setLine(
         "That's all - short and sweet! Hear it again, or shall we go?",
@@ -1883,9 +2205,12 @@ export class TourSystem extends createSystem({
     } else if (p === 'ready') {
       // she named a place and Milo is in the car beside her: the ride
       // starts with the Start ride button (no circle gesture any more).
+      // ONE Milo-talking screen (Bhanu 2026-11-18): the bubble says
+      // "Lovely! Tap Start ride..." - the panel shows the destination,
+      // not his words a second time.
       const dest = PLACES[this.pendingPlace ?? ''];
       this.setLine(
-        READY_LINE,
+        dest ? `Ready to go to ${dest.name}` : 'Ready to go',
         dest ? `READY TO GO TO ${dest.name.toUpperCase()}` : 'READY TO GO',
       );
       show('btn-start-ride');
@@ -1897,6 +2222,9 @@ export class TourSystem extends createSystem({
       // the separate option to drive herself, as a tap as well as a
       // voice ask - she takes the driver seat, Milo the passenger seat
       show('btn-selfdrive');
+      // seat height, in the car too (Bhanu 2026-11-18)
+      show('btn-seat-up');
+      show('btn-seat-down');
     } else if (p === 'driving') {
       const dest = PLACES[this.destPlace];
       if (this.selfDriving) {
@@ -1919,6 +2247,9 @@ export class TourSystem extends createSystem({
       show('btn-stop');
       show('btn-mic');
       show('btn-music');
+      // seat height, while driving too (Bhanu 2026-11-18)
+      show('btn-seat-up');
+      show('btn-seat-down');
       // turn left / turn right DURING the drive, as tap buttons as well
       // as voice; when she drives herself, the wheel goes back to Milo
       show('btn-turn-left');
@@ -1927,11 +2258,11 @@ export class TourSystem extends createSystem({
       else show('btn-selfdrive');
       // no left/right here: the choice comes only after the visit ends
     } else if (p === 'getout') {
+      // ONE Milo-talking screen (Bhanu 2026-11-18): the bubble says
+      // "Here is the destination!" - the panel shows the place name,
+      // not his words a second time.
       const pl = PLACES[this.place];
-      this.setLine(
-        `Here is the destination - ${pl ? pl.name : 'New York'}!`,
-        '',
-      );
+      this.setLine(pl ? pl.name : 'You are here!', '');
     } else if (p === 'arrived') {
       // Screen 4 mockup: the panel is titled with the place name
       // ("Times Square"), History / Photo / mic beside it. The bubble
@@ -1944,36 +2275,69 @@ export class TourSystem extends createSystem({
         this.showJournalBook(show);
       } else {
         this.setLine(pl ? pl.name : 'You are here!', '');
-        this.setEl('btn-photo-label', { text: 'Photo' });
+        // after her first photo here the button reads "Another photo"
+        // (Bhanu 2026-11-18): she can take 2-3 photos at one place
+        this.setEl('btn-photo-label', {
+          text: this.photosAtPlace > 0 ? 'Another photo' : 'Photo',
+        });
         show('btn-history');
         show('btn-photo');
         // Photo / Selfie toggle (Bhanu 2026-11-17 22:27): the button
-        // names the mode it switches TO - "Selfie" while in photo mode,
-        // "Photo" while in selfie mode
-        this.setEl('btn-selfie-label', { text: this.photoMode === 'selfie' ? 'Photo' : 'Selfie' });
-        show('btn-selfie');
+        // names the mode it switches TO - "Selfie" while in photo mode.
+        // In selfie mode it would read "Photo" - a second Photo button
+        // next to the real one (Bhanu 2026-11-18) - so the toggle hides
+        // while in selfie mode; the mode resets to photo after the
+        // photo (see takePhotoNow) and when the visit ends (see
+        // finishVisit), so the toggle always comes back.
+        if (this.photoMode === 'photo') {
+          this.setEl('btn-selfie-label', { text: 'Selfie' });
+          show('btn-selfie');
+        }
         show('btn-where');
         show('btn-mic');
         show('btn-music');
         show('btn-journal');
+        // seat height, on foot too (Bhanu 2026-11-18): the same nudge
+        // as in the car, so she can raise herself to Milo's eye level
+        // at a destination as well
+        show('btn-seat-up');
+        show('btn-seat-down');
         // "I'm done" ends the whole tour from here - she has visited
         // enough places and wants to finish (Bhanu 2026-11-17)
         show('btn-im-done');
         // holding a souvenir: she can send it to the Journal (the
         // glowing ring) with one tap, as well as by tossing it
         if (this.heldObject) show('btn-send-journal');
+        // hold-to-confirm (Bhanu 2026-11-18 07:25): she held it 2
+        // seconds, so Milo asks first - Yes sends it, No keeps it in
+        // her hand. The question replaces the place name on the panel
+        // while it is up, so it is the one thing she sees.
+        if (this.holdConfirmShown) {
+          this.setLine('Send this to the Journal?', 'YES OR NO');
+          show('btn-journal-yes');
+          show('btn-journal-no');
+        }
       }
     } else if (p === 'photopick') {
-      // tap-to-grab (Bhanu 2026-11-17): the panel names both ways in
+      // tap-to-grab (Bhanu 2026-11-17): the panel names the place and
+      // the grab hint. ONE Milo-talking screen (Bhanu 2026-11-18): the
+      // bubble carries "Grab something to hold in your photo - pinch
+      // it, or tap it! The ..." - the panel does not repeat his words.
+      const pl = PLACES[this.place];
       this.setLine(
-        'Grab something to hold in your photo!',
+        pl ? `Photo at ${pl.name}` : 'Photo time',
         'PINCH IT - OR TAP IT',
       );
       this.setEl('btn-photo-label', { text: 'Take the photo' });
       show('btn-photo');
-      // Photo / Selfie toggle: the button names the mode it switches TO
-      this.setEl('btn-selfie-label', { text: this.photoMode === 'selfie' ? 'Photo' : 'Selfie' });
-      show('btn-selfie');
+      // Photo / Selfie toggle: in selfie mode it would read "Photo" -
+      // a second Photo button next to "Take the photo" (Bhanu
+      // 2026-11-18) - so it hides while in selfie mode, leaving exactly
+      // one Photo button, and tapping it takes the selfie
+      if (this.photoMode === 'photo') {
+        this.setEl('btn-selfie-label', { text: 'Selfie' });
+        show('btn-selfie');
+      }
       show('btn-music');
       show('btn-im-done');
     } else if (p === 'story') {
@@ -1985,13 +2349,18 @@ export class TourSystem extends createSystem({
       });
       show('btn-im-done');
     } else if (p === 'thankyou') {
-      // Milo took HER here, so he closes the visit with how much he
-      // loved taking her - and she can thank him back (button or voice)
-      this.setLine(VISIT_CLOSE_LINE, 'VISIT COMPLETE');
+      // Milo took HER here, so he closes the visit - his words are in
+      // the bubble only (ONE Milo-talking screen, Bhanu 2026-11-18);
+      // the panel shows the visit is complete, and she can thank him
+      // back (button or voice)
+      this.setLine('Visit complete!', 'VISIT COMPLETE');
       show('btn-thank-milo');
     } else if (p === 'next') {
+      // ONE Milo-talking screen (Bhanu 2026-11-18): the bubble carries
+      // the suggestion ("Let's go left first - ...") - the panel asks
+      // the question and shows the left/right buttons, not his words.
       this.setLine(
-        this.suggestionText,
+        'Where next?',
         'POINT LEFT with your left hand  |  POINT RIGHT with your right hand',
       );
       if (this.nextLeft) show('btn-left');
@@ -2000,13 +2369,15 @@ export class TourSystem extends createSystem({
       show('btn-music');
       show('btn-im-done');
     } else if (p === 'goodbye') {
-      // the end of the whole tour: first Milo's thank-you, then her
-      // Journal (the scrapbook) opens on this same screen - closing it
-      // takes her back to the Welcome screen (see closeJournal)
+      // the end of the whole tour: first Milo's thank-you (in the
+      // bubble only - ONE Milo-talking screen, Bhanu 2026-11-18), then
+      // her Journal (the scrapbook) opens on this same screen -
+      // closing it takes her back to the Welcome screen (see
+      // closeJournal)
       if (this.journalOpen) {
         this.showJournalBook(show);
       } else {
-        this.setLine(TOUR_END_LINE, 'THANK YOU');
+        this.setLine('Thank you!', 'THANK YOU');
         show('btn-thank-milo');
       }
     }
@@ -2043,6 +2414,16 @@ export class TourSystem extends createSystem({
     // the first rule, spoken as it appears on the panel; the other lines
     // are spoken as the panel rotates to them (see the update loop), so
     // the bubble beside him is the live transcript of what he is saying
+    // (Bhanu 2026-11-18: lines 2-4 never played on her phone - their
+    // play() ran from the timer, not this tap, and the phone refused it
+    // with no retry. Prime their clip elements inside THIS tap, so each
+    // element has played in a gesture before the timer plays it.)
+    this.primeVoiceClip('intro-2.mp3');
+    this.primeVoiceClip('intro-3.mp3');
+    this.primeVoiceClip('intro-4.mp3');
+    this.introLineSpokenAtMs = performance.now();
+    this.introLineRetryAtMs = 0;
+    this.introLineFallbackDone = false;
     this.speak(INTRO_LINES[0]);
   }
 
@@ -2053,9 +2434,11 @@ export class TourSystem extends createSystem({
   }
 
   /** Skip the tutorial: straight back to the main screen (Start tutorial
-   * / Start the game) - not into the game. */
+   * / Start the game) - not into the game. From the done screen, and
+   * from line 1 on (Bhanu 2026-11-18): Skip is visible the whole
+   * tutorial, so it must work the whole tutorial. */
   private skipTutorial(): void {
-    if (this.phase !== 'tutdone') return;
+    if (this.phase !== 'tutdone' && this.phase !== 'tutorial') return;
     this.setPhase('enter');
   }
 
@@ -2109,7 +2492,7 @@ export class TourSystem extends createSystem({
     // Just the screen and Milo, standing right in front of her,
     // facing her, talking, like two friends going out together. (He may
     // already be standing in front from the tutorial void; standing him
-    // in front again just re-places him 1.5 m dead ahead.)
+    // in front again just re-places him 2.2 m dead ahead.)
     this.city.visible = false;
     this.carObj.visible = false;
     this.standMiloInFront();
@@ -2140,6 +2523,9 @@ export class TourSystem extends createSystem({
   /** The visit is done (photos done, or "Where next?" tapped): thank-you, then left/right. */
   private finishVisit(): void {
     if (this.phase !== 'arrived' && this.phase !== 'photopick' && this.phase !== 'story') return;
+    // leaving the visit without a photo: selfie mode resets too, so
+    // the toggle is back for the next place (see takePhotoNow)
+    this.photoMode = 'photo';
     this.sayThankYou();
   }
 
@@ -2472,8 +2858,11 @@ export class TourSystem extends createSystem({
     return `${this.journalPage + 1}. ${e.name} - ${e.place}`;
   }
 
-  /** The book's page count for the panel eyebrow. */
+  /** The book's page count for the panel eyebrow. With nothing saved
+   * yet there is no page to count ("PAGE 1 OF 0" reads broken), so the
+   * eyebrow is just the book's name. */
   private journalPageSub(): string {
+    if (this.journal.length === 0) return 'MY TRAVEL JOURNAL';
     return `MY TRAVEL JOURNAL - PAGE ${this.journalPage + 1} OF ${this.journal.length}`;
   }
 
@@ -2552,7 +2941,7 @@ export class TourSystem extends createSystem({
     this.photoPlane.position.set(head.x + fwd.x * 0.85, head.y + 0.05, head.z + fwd.z * 0.85);
     this.photoPlane.lookAt(head.x, head.y + 0.05, head.z);
     this.photoPlane.visible = true;
-    // the book page's 3D item steps aside for the big photo
+    // the book page's flat card steps aside for the big photo
     this.hideJournalGallery();
     this.refreshUI();
   }
@@ -2608,20 +2997,21 @@ export class TourSystem extends createSystem({
     this.placePanelsInFront();
   }
 
-  /** Journal gallery (Bhanu 2026-11-16 22:39, scene 7): the open
-   * scrapbook from her picture - when the Journal opens, the saved
-   * souvenir 3D objects appear in a row in front of her at eye level,
-   * like the items laid out on the journal pages, with Milo beside
-   * them. Hidden again on close. */
+  /** Journal gallery (Bhanu 2026-11-16 22:39, scene 7, FLAT since
+   * 2026-11-18): the open scrapbook from her picture - when the
+   * Journal opens, the current page shows as a FLAT PICTURE pasted on
+   * the page: a card with a drawn 2D pictogram + name + place for a
+   * souvenir, the actual photo pasted on the card for a photo page.
+   * Never the 3D model floating in the book (Bhanu 2026-11-18) - the
+   * saved 3D objects stay hidden in the Journal. The card floats 0.8 m
+   * ahead, just below eye level, close to her. */
   private showJournalGallery(): void {
-    // the book shows ONE keepsake per page: only the current page's
-    // souvenir stands in front of her (a photo page shows its photo
-    // plane instead - see openPhotoBig). Hide the other pages first.
+    // the book shows ONE keepsake per page: draw this page's card,
+    // hide the other pages first
     this.hideJournalGallery();
     const e = this.journal[this.journalPage];
-    if (!e || e.kind !== 'souvenir' || !e.souvenirId) return;
-    const s = this.souvenirObjs.find((o) => o.id === e.souvenirId);
-    if (!s) return;
+    if (!e || !this.journalCard) return;
+    this.drawJournalCard(e);
     const head = this.headPos();
     const fwd = this.headLookDir(this.tmpFwd);
     // the Journal opens CLOSE to her (Bhanu 2026-11-17 22:18: "the
@@ -2629,13 +3019,15 @@ export class TourSystem extends createSystem({
     // 0.8 m ahead, just below eye level, within easy reach (was 1.2 m)
     const px = head.x + fwd.x * 0.8;
     const pz = head.z + fwd.z * 0.8;
-    if (s.homeParent) s.homeParent.add(s.obj);
-    s.obj.position.set(px, head.y - 0.05, pz);
-    s.obj.visible = true;
+    this.journalCard.position.set(px, head.y - 0.05, pz);
+    this.journalCard.lookAt(head.x, head.y - 0.05, head.z);
+    this.journalCard.visible = true;
   }
 
-  /** Put the gallery objects back home (hidden) when the Journal closes. */
+  /** Put the gallery card away (and the saved 3D objects back home,
+   * hidden) when the Journal closes or the page turns. */
   private hideJournalGallery(): void {
+    if (this.journalCard) this.journalCard.visible = false;
     this.journalSavedIds.forEach((id) => {
       const s = this.souvenirObjs.find((o) => o.id === id);
       if (!s) return;
@@ -2644,6 +3036,437 @@ export class TourSystem extends createSystem({
       s.obj.quaternion.copy(s.homeQuat);
       s.obj.visible = false;
     });
+  }
+
+  /** Draw the current Journal page as a flat pasted picture on the
+   * card canvas: cream paper, a 2D pictogram of the souvenir (or the
+   * photo itself, pasted in), its name and the place. The 3D model is
+   * never drawn here - the page is a picture, like a scrapbook. */
+  private drawJournalCard(e: {
+    kind: 'souvenir' | 'photo';
+    name: string;
+    place: string;
+    souvenirId?: string;
+    image?: string;
+  }): void {
+    const canvas = this.journalCardCanvas;
+    const tex = this.journalCardTex;
+    if (!canvas || !tex) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    // cream paper + border, like a scrapbook page
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#fff8e7';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#d9c9a3';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+    ctx.fillStyle = '#92400e';
+    ctx.font = '700 20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('MY TRAVEL JOURNAL', W / 2, 44);
+    // the picture area: a souvenir's drawn pictogram, or the photo
+    // itself pasted in
+    const px = 36;
+    const py = 62;
+    const pw = W - 72;
+    const ph = 380;
+    if (e.kind === 'photo' && e.image) {
+      const img = this.journalCardPhotoImg;
+      if (img && this.journalCardPhotoFor === e.image && img.complete && img.naturalWidth > 0) {
+        // cover-fit the photo into the picture area
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+        const scale = Math.max(pw / iw, ph / ih);
+        const dw = iw * scale;
+        const dh = ih * scale;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(px, py, pw, ph);
+        ctx.clip();
+        ctx.drawImage(img, px + (pw - dw) / 2, py + (ph - dh) / 2, dw, dh);
+        ctx.restore();
+      } else {
+        // the photo is still loading: a dark frame + label, redrawn
+        // when it arrives (see onload below)
+        ctx.fillStyle = '#111827';
+        ctx.fillRect(px, py, pw, ph);
+        ctx.fillStyle = '#f5d90a';
+        ctx.font = '700 28px sans-serif';
+        ctx.fillText('Photo', W / 2, py + ph / 2);
+        const im = new Image();
+        this.journalCardPhotoImg = im;
+        this.journalCardPhotoFor = e.image;
+        im.onload = () => {
+          if (this.journalCardPhotoFor === e.image) this.drawJournalCard(e);
+        };
+        im.src = e.image;
+      }
+    } else {
+      // white picture frame, pictogram pasted inside it
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px, py, pw, ph);
+      ctx.strokeStyle = '#e5ddd0';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px, py, pw, ph);
+      this.drawSouvenirIcon(ctx, e.souvenirId ?? '', W / 2, py + ph / 2, 120);
+    }
+    // the caption pasted under the picture: name, then the place
+    ctx.fillStyle = '#1f2937';
+    ctx.font = '700 30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(e.name, W / 2, 500, W - 60);
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '400 26px sans-serif';
+    ctx.fillText(e.place, W / 2, 542, W - 60);
+    ctx.fillStyle = '#b45309';
+    ctx.font = '700 18px sans-serif';
+    ctx.fillText('PASTED IN MY JOURNAL', W / 2, 596);
+    tex.needsUpdate = true;
+  }
+
+  /** A small rounded-rect path helper for the pictograms. */
+  private rr(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+  ): void {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /** One flat 2D pictogram per souvenir, drawn like a sticker pasted
+   * on the Journal page. Simple shapes only - the point is that the
+   * page shows a PICTURE of the keepsake, not the 3D model. */
+  private drawSouvenirIcon(
+    ctx: CanvasRenderingContext2D,
+    id: string,
+    cx: number,
+    cy: number,
+    s: number,
+  ): void {
+    ctx.save();
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#1f2937';
+    if (id === 'souvenir-camera') {
+      ctx.fillStyle = '#374151';
+      this.rr(ctx, cx - s, cy - s * 0.55, 2 * s, 1.15 * s, 16);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#374151';
+      ctx.fillRect(cx - s * 0.3, cy - s * 0.8, s * 0.6, s * 0.3);
+      ctx.fillStyle = '#7dd3fc';
+      ctx.beginPath();
+      ctx.arc(cx, cy + s * 0.05, s * 0.38, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#0ea5e9';
+      ctx.beginPath();
+      ctx.arc(cx, cy + s * 0.05, s * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (id.startsWith('souvenir-statue')) {
+      // little green Liberty: crown spikes, head, robe, torch
+      ctx.fillStyle = '#34d399';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.7, cy + s * 0.9);
+      ctx.lineTo(cx - s * 0.35, cy - s * 0.1);
+      ctx.lineTo(cx + s * 0.35, cy - s * 0.1);
+      ctx.lineTo(cx + s * 0.7, cy + s * 0.9);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy - s * 0.35, s * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      for (let i = -2; i <= 2; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 6;
+        ctx.moveTo(cx + Math.cos(a) * s * 0.3, cy - s * 0.35 + Math.sin(a) * s * 0.3);
+        ctx.lineTo(cx + Math.cos(a) * s * 0.55, cy - s * 0.35 + Math.sin(a) * s * 0.55);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#92400e';
+      ctx.beginPath();
+      ctx.moveTo(cx + s * 0.55, cy + s * 0.5);
+      ctx.lineTo(cx + s * 0.85, cy - s * 0.2);
+      ctx.stroke();
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.ellipse(cx + s * 0.85, cy - s * 0.35, s * 0.12, s * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (id === 'souvenir-cup') {
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.6, cy - s * 0.4);
+      ctx.lineTo(cx + s * 0.6, cy - s * 0.4);
+      ctx.lineTo(cx + s * 0.4, cy + s * 0.7);
+      ctx.lineTo(cx - s * 0.4, cy + s * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(cx - s * 0.6, cy - s * 0.05, s * 1.2, s * 0.3);
+      ctx.beginPath();
+      ctx.arc(cx + s * 0.75, cy + s * 0.1, s * 0.3, -Math.PI / 2, Math.PI / 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#94a3b8';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + s * 0.85, s * 0.75, s * 0.12, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (id === 'souvenir-torch') {
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(cx - s * 0.12, cy - s * 0.1, s * 0.24, s * 0.9);
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s * 0.9);
+      ctx.quadraticCurveTo(cx + s * 0.45, cy - s * 0.3, cx, cy - s * 0.05);
+      ctx.quadraticCurveTo(cx - s * 0.45, cy - s * 0.3, cx, cy - s * 0.9);
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - s * 0.25, s * 0.14, s * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (id === 'souvenir-watch') {
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.arc(cx, cy + s * 0.1, s * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy + s * 0.1, s * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + s * 0.1);
+      ctx.lineTo(cx, cy - s * 0.2);
+      ctx.moveTo(cx, cy + s * 0.1);
+      ctx.lineTo(cx + s * 0.25, cy + s * 0.25);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy - s * 0.6, s * 0.18, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (id === 'souvenir-polaroid') {
+      ctx.fillStyle = '#ffffff';
+      this.rr(ctx, cx - s * 0.6, cy - s * 0.8, s * 1.2, s * 1.6, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#1f2937';
+      ctx.fillRect(cx - s * 0.45, cy - s * 0.65, s * 0.9, s * 0.9);
+      ctx.fillStyle = '#7dd3fc';
+      ctx.beginPath();
+      ctx.arc(cx - s * 0.1, cy - s * 0.2, s * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (id === 'souvenir-skyscraper') {
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(cx - s * 0.35, cy - s * 0.5, s * 0.7, s * 1.4);
+      ctx.fillStyle = '#fde68a';
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 2; c++) {
+          ctx.fillRect(cx - s * 0.22 + c * s * 0.28, cy - s * 0.35 + r * s * 0.3, s * 0.14, s * 0.14);
+        }
+      }
+      ctx.fillStyle = '#64748b';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.2, cy - s * 0.5);
+      ctx.lineTo(cx, cy - s * 0.95);
+      ctx.lineTo(cx + s * 0.2, cy - s * 0.5);
+      ctx.closePath();
+      ctx.fill();
+    } else if (id === 'souvenir-bridge') {
+      ctx.strokeStyle = '#b45309';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.9, cy + s * 0.7);
+      ctx.lineTo(cx + s * 0.9, cy + s * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = '#b45309';
+      ctx.fillRect(cx - s * 0.7, cy - s * 0.6, s * 0.22, s * 1.3);
+      ctx.fillRect(cx + s * 0.48, cy - s * 0.6, s * 0.22, s * 1.3);
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.59, cy - s * 0.6);
+      ctx.quadraticCurveTo(cx, cy + s * 0.45, cx + s * 0.59, cy - s * 0.6);
+      ctx.stroke();
+    } else if (id === 'souvenir-wtc') {
+      ctx.fillStyle = '#93c5fd';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.4, cy + s * 0.9);
+      ctx.lineTo(cx - s * 0.25, cy - s * 0.7);
+      ctx.lineTo(cx + s * 0.25, cy - s * 0.7);
+      ctx.lineTo(cx + s * 0.4, cy + s * 0.9);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s * 0.7);
+      ctx.lineTo(cx, cy - s * 1.0);
+      ctx.stroke();
+    } else if (id === 'souvenir-bouquet') {
+      ctx.strokeStyle = '#16a34a';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + s * 0.2);
+      ctx.lineTo(cx - s * 0.2, cy + s * 0.9);
+      ctx.moveTo(cx, cy + s * 0.2);
+      ctx.lineTo(cx + s * 0.2, cy + s * 0.9);
+      ctx.stroke();
+      const petals: Array<[number, number, string]> = [
+        [-0.35, -0.35, '#f472b6'],
+        [0.35, -0.35, '#fbbf24'],
+        [0, -0.6, '#fb7185'],
+        [-0.15, -0.05, '#f472b6'],
+        [0.2, -0.05, '#fb7185'],
+      ];
+      petals.forEach(([dx, dy, col]) => {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(cx + dx * s, cy + dy * s, s * 0.28, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else if (id === 'souvenir-ball') {
+      ctx.fillStyle = '#f5d90a';
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        ctx.moveTo(cx + Math.cos(a) * s * 0.7, cy + Math.sin(a) * s * 0.7);
+        ctx.lineTo(cx + Math.cos(a) * s * 0.95, cy + Math.sin(a) * s * 0.95);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#92400e';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.7, cy);
+      ctx.lineTo(cx + s * 0.7, cy);
+      ctx.moveTo(cx, cy - s * 0.7);
+      ctx.lineTo(cx, cy + s * 0.7);
+      ctx.stroke();
+    } else if (id === 'souvenir-tree') {
+      ctx.fillStyle = '#16a34a';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s * 0.9);
+      ctx.lineTo(cx - s * 0.6, cy - s * 0.1);
+      ctx.lineTo(cx + s * 0.6, cy - s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s * 0.4);
+      ctx.lineTo(cx - s * 0.75, cy + s * 0.5);
+      ctx.lineTo(cx + s * 0.75, cy + s * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(cx - s * 0.12, cy + s * 0.5, s * 0.24, s * 0.4);
+    } else if (id === 'souvenir-train') {
+      ctx.fillStyle = '#dc2626';
+      this.rr(ctx, cx - s * 0.8, cy - s * 0.5, s * 1.6, s * 0.8, 12);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#bae6fd';
+      ctx.fillRect(cx - s * 0.55, cy - s * 0.3, s * 0.4, s * 0.35);
+      ctx.fillRect(cx + s * 0.05, cy - s * 0.3, s * 0.4, s * 0.35);
+      ctx.fillStyle = '#1f2937';
+      ctx.beginPath();
+      ctx.arc(cx - s * 0.45, cy + s * 0.45, s * 0.18, 0, Math.PI * 2);
+      ctx.arc(cx + s * 0.45, cy + s * 0.45, s * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (id === 'souvenir-boat') {
+      ctx.fillStyle = '#2563eb';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.7, cy + s * 0.3);
+      ctx.lineTo(cx + s * 0.7, cy + s * 0.3);
+      ctx.lineTo(cx + s * 0.45, cy + s * 0.8);
+      ctx.lineTo(cx - s * 0.45, cy + s * 0.8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = '#1f2937';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + s * 0.3);
+      ctx.lineTo(cx, cy - s * 0.8);
+      ctx.stroke();
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s * 0.8);
+      ctx.lineTo(cx, cy + s * 0.2);
+      ctx.lineTo(cx + s * 0.6, cy + s * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (id === 'souvenir-telescope') {
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.6, cy - s * 0.4);
+      ctx.lineTo(cx + s * 0.6, cy - s * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = '#0ea5e9';
+      ctx.beginPath();
+      ctx.arc(cx + s * 0.65, cy - s * 0.72, s * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s * 0.5);
+      ctx.lineTo(cx - s * 0.4, cy + s * 0.8);
+      ctx.moveTo(cx, cy - s * 0.5);
+      ctx.lineTo(cx + s * 0.4, cy + s * 0.8);
+      ctx.moveTo(cx, cy - s * 0.5);
+      ctx.lineTo(cx, cy + s * 0.8);
+      ctx.stroke();
+    } else if (id === 'souvenir-pool') {
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(cx - s * 0.8, cy - s * 0.4, s * 1.6, s * 0.8);
+      ctx.stroke();
+      ctx.fillStyle = '#bae6fd';
+      ctx.fillRect(cx - s * 0.6, cy - s * 0.2, s * 1.2, s * 0.4);
+      ctx.strokeStyle = '#e5ddd0';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(cx - s * 0.8, cy - s * 0.4, s * 1.6, s * 0.8);
+    } else if (id === 'souvenir-plant') {
+      ctx.fillStyle = '#16a34a';
+      ctx.beginPath();
+      ctx.ellipse(cx - s * 0.3, cy - s * 0.5, s * 0.2, s * 0.45, -0.4, 0, Math.PI * 2);
+      ctx.ellipse(cx + s * 0.3, cy - s * 0.5, s * 0.2, s * 0.45, 0.4, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy - s * 0.65, s * 0.2, s * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#b45309';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.5, cy - s * 0.1);
+      ctx.lineTo(cx + s * 0.5, cy - s * 0.1);
+      ctx.lineTo(cx + s * 0.35, cy + s * 0.8);
+      ctx.lineTo(cx - s * 0.35, cy + s * 0.8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      // unknown keepsake: a plain star, so the page never shows blank
+      ctx.fillStyle = '#f5d90a';
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        const r = i % 2 === 0 ? s * 0.8 : s * 0.35;
+        if (i === 0) ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        else ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /** Send the held souvenir to the Journal (tap path): it flies along
@@ -2677,7 +3500,80 @@ export class TourSystem extends createSystem({
     // not in her hand any more, and the photo flow must not see it
     this.heldObject = null;
     this.photoObject = null;
+    this.clearHoldConfirm();
     this.refreshUI();
+  }
+
+  /** End the hold (release, send, or leaving the destination): the
+   * question closes, the ring goes away, and no timer is running. */
+  private clearHoldConfirm(): void {
+    this.holdStartMs = null;
+    this.holdConfirmShown = false;
+    this.holdConfirmDeclined = false;
+    if (this.holdRing) this.holdRing.visible = false;
+  }
+
+  /** The 2-second hold is done: Milo asks before sending anything -
+   * the souvenir stays in her hand until she says Yes. */
+  private showHoldConfirm(): void {
+    if (this.holdConfirmShown || !this.heldObject || this.phase !== 'arrived') return;
+    this.holdConfirmShown = true;
+    const name = SOUVENIR_NAMES[this.heldObject] ?? 'souvenir';
+    this.speak(`Send the ${name} to your Journal?`);
+    this.refreshUI();
+    log('hold confirm shown for', this.heldObject);
+  }
+
+  /** "Yes" on the hold-to-confirm panel: the held souvenir leaves her
+   * hand and flies to the Journal along the glowing arc. */
+  private confirmJournalYes(): void {
+    if (!this.holdConfirmShown || !this.heldObject) return;
+    this.holdConfirmShown = false;
+    this.sendHeldToJournal();
+  }
+
+  /** "No" on the hold-to-confirm panel: the panel closes and she keeps
+   * holding the souvenir - nothing is sent, and the question is not
+   * asked again until she grabs it again. */
+  private confirmJournalNo(): void {
+    if (!this.holdConfirmShown) return;
+    this.holdConfirmShown = false;
+    this.holdConfirmDeclined = true;
+    const name = this.heldObject ? (SOUVENIR_NAMES[this.heldObject] ?? 'souvenir') : 'souvenir';
+    this.speak(`Okay - the ${name} stays with you.`);
+    this.refreshUI();
+    log('hold confirm declined for', this.heldObject);
+  }
+
+  /** Hold-to-confirm (Bhanu 2026-11-18 07:25): while she holds a
+   * souvenir at a destination, a ring around it fills over 2 seconds;
+   * when it fills, Milo asks "Send this to the Journal?" - Yes sends
+   * it along the glowing arc, No keeps it in her hand. The ring is
+   * the visible countdown, so the question never surprises her. */
+  private updateHoldConfirm(): void {
+    const ring = this.holdRing;
+    if (!ring) return;
+    const holding = this.phase === 'arrived' && !!this.heldObject && !this.journalFlyActive;
+    if (!holding || this.holdConfirmShown || this.holdConfirmDeclined || this.holdStartMs === null) {
+      ring.visible = false;
+      return;
+    }
+    const s = this.souvenirObjs.find((o) => o.id === this.heldObject);
+    if (!s) {
+      ring.visible = false;
+      return;
+    }
+    const progress = clamp((performance.now() - this.holdStartMs) / HOLD_CONFIRM_MS, 0, 1);
+    // the ring hugs the held souvenir and turns to face her, so the
+    // filling arc reads from any angle she holds it at
+    s.obj.getWorldPosition(this.tmpHoldPos);
+    ring.position.copy(this.tmpHoldPos);
+    const head = this.headPos();
+    ring.lookAt(head.x, head.y, head.z);
+    const geo = this.holdRingProgressGeo;
+    if (geo) geo.setDrawRange(0, Math.floor(progress * 48) * 6);
+    ring.visible = true;
+    if (progress >= 1) this.showHoldConfirm();
   }
 
   /** The glowing arc from a held souvenir to the Journal ring, rewritten
@@ -2740,25 +3636,44 @@ export class TourSystem extends createSystem({
     ring.lookAt(head.x, y, head.z);
   }
 
-  /** Raise her eye height in the car (Bhanu 2026-11-17 22:18): seated
+  /** Her eye-height target, with her own seat nudge applied (Seat up /
+   * Seat down), clamped to SEAT_MIN..SEAT_MAX. */
+  private effectiveSeatTarget(): number {
+    return clamp(SEAT_EYE_TARGET + this.seatAdjust, SEAT_MIN, SEAT_MAX);
+  }
+
+  /** Nudge the seat up or down (Bhanu 2026-11-18): one tap moves the
+   * eye-height target by `delta` (SEAT_STEP), clamped so the target
+   * stays in SEAT_MIN..SEAT_MAX. Works in the car and on foot - it is
+   * the same offset updateSeatBoost uses in both cases. */
+  private adjustSeat(delta: number): void {
+    const lo = SEAT_MIN - SEAT_EYE_TARGET;
+    const hi = SEAT_MAX - SEAT_EYE_TARGET;
+    this.seatAdjust = clamp(this.seatAdjust + delta, lo, hi);
+    this.say(delta > 0 ? 'Seat a little higher.' : 'Seat a little lower.');
+    this.refreshUI();
+  }
+
+  /** Raise her eye height (Bhanu 2026-11-17 22:18, 2026-11-18): seated
    * on the Quest her eyes sit ~1.05 m, below Milo's eyes (1.26 m) -
-   * she sees his legs. While she is in the car the whole rig (headset
+   * she sees his legs. While she is in the game the whole rig (headset
    * + hands, which hang off the rig) is lifted so her eyes sit at
-   * SEAT_EYE_TARGET, Milo's face at eye level. Only in a live XR
-   * session - in the flat simulator the rig is not used, so no boost.
-   * Eased, so the view glides up instead of jumping; removed when she
-   * steps out, so she lands back at her real height. debugHeadY
-   * (autotest only) stands in for the real head height. */
+   * SEAT_EYE_TARGET, Milo's face just below eye level. In the car AND
+   * on foot - the old car-only lift left her looking up at him at
+   * every destination. Only in a live XR session - in the flat
+   * simulator the rig is not used, so no boost. Eased, so the view
+   * glides up instead of jumping. debugHeadY (autotest only) stands
+   * in for the real head height. */
   private updateSeatBoost(dt: number): void {
-    const inCar =
-      !!this.carObj?.visible &&
-      (this.phase === 'ready' || this.phase === 'driving' || this.phase === 'choose');
+    // in the game, in the car and on foot alike - not on the Welcome
+    // screen or in the tutorial void
+    const inGame = !['enter', 'tutorial', 'tutdone'].includes(this.phase);
     let target = 0;
-    if (inCar) {
+    if (inGame) {
       const xrLive = this.world.session !== undefined || this.debugHeadY !== null;
       if (xrLive) {
         const rawY = this.rawHeadY();
-        if (rawY >= 0.5) target = clamp(SEAT_EYE_TARGET - rawY, 0, SEAT_BOOST_MAX);
+        if (rawY >= 0.5) target = clamp(this.effectiveSeatTarget() - rawY, 0, SEAT_BOOST_MAX);
       }
     }
     this.seatBoostTarget = target;
@@ -3151,6 +4066,10 @@ export class TourSystem extends createSystem({
     this.paused = false;
     this.currentNode = node;
     this.place = destPlace;
+    // a new visit starts with no photos yet (Bhanu 2026-11-18): the
+    // Photo button reads "Photo" again here, "Another photo" only
+    // after her first photo at THIS place
+    this.photosAtPlace = 0;
     this.applyPlaceCityVisibility();
     this.visited.add(destPlace);
     if (this.nearbyTimer) {
@@ -3215,7 +4134,7 @@ export class TourSystem extends createSystem({
    * her forward ray (dead ahead first, then ±20° and ±40°) at 1.5–6 m
    * and take the closest, most frontal spot on pedestrian ground, off
    * the road, clear of the parked car and the souvenir table. With road
-   * rules off (the tutorial void) he just stands 1.5 m dead ahead.
+   * rules off (the tutorial void) he just stands 2.2 m dead ahead.
    * Writes the spot into `out` (world coords) and returns true; false
    * only when no ground qualifies (the caller falls back to STAND_SPOTS).
    */
@@ -3259,7 +4178,12 @@ export class TourSystem extends createSystem({
     const right = this.tmpRight;
     right.set(-fwd.z, 0, fwd.x);
     if (!useRoadRules) {
-      out.set(head.x + fwd.x * 1.5, STAND_Y, head.z + fwd.z * 1.5);
+      // Milo stands further back now (Bhanu 2026-11-18): at 1.5 m his
+      // big head filled her vision when she tapped Start game - at
+      // 2.2 m his whole head and body fit comfortably in view, a
+      // friendly distance for talking, still close enough to see his
+      // face clearly.
+      out.set(head.x + fwd.x * 2.2, STAND_Y, head.z + fwd.z * 2.2);
       return true;
     }
     // the parked car, in world coords (it slides to z -5 while he steps
@@ -3334,7 +4258,7 @@ export class TourSystem extends createSystem({
   /**
    * Milo stands in front of her, facing her, talking - the out-of-car
    * pose for the tutorial/intro (the city is still hidden, so there is
-   * no road to stay off; he just stands 1.5 m dead ahead in the void).
+   * no road to stay off; he just stands 2.2 m dead ahead in the void).
    * Bhanu's rule: he is on her left ONLY in the car; everywhere else he
    * stands directly in front of her.
    */
@@ -3858,7 +4782,7 @@ export class TourSystem extends createSystem({
    * a soft piano music-box loop, like a lullaby. An ORIGINAL tune made
    * in code with the Web Audio API (no audio file, no copyrighted
    * track): a soft warm pad under a slow music-box melody (see
-   * MUSIC_CHORDS / MUSIC_MELODY). Quiet (master gain 0.12) so it sits
+   * MUSIC_CHORDS / MUSIC_MELODY). Quiet (master gain 0.08) so it sits
    * underneath Milo's voice. Starts on her first tap (no autoplay -
    * browsers refuse sound before a gesture). The step timer is
    * wall-clock, not frame-based, so the loop keeps time even while the
@@ -3870,7 +4794,7 @@ export class TourSystem extends createSystem({
     if (!ctx) return;
     if (ctx.state === 'suspended') void ctx.resume();
     this.musicMaster = ctx.createGain();
-    this.musicMaster.gain.value = this.musicMuted ? 0 : 0.12;
+    this.musicMaster.gain.value = this.musicMuted ? 0 : MUSIC_GAIN;
     this.musicMaster.connect(ctx.destination);
     this.musicStep = 0;
     this.musicPlaying = true;
@@ -3947,7 +4871,7 @@ export class TourSystem extends createSystem({
   private toggleMusic(): void {
     this.musicMuted = !this.musicMuted;
     if (this.musicMaster) {
-      this.musicMaster.gain.value = this.musicMuted ? 0 : 0.12;
+      this.musicMaster.gain.value = this.musicMuted ? 0 : MUSIC_GAIN;
     }
     this.refreshUI();
   }
@@ -3964,10 +4888,23 @@ export class TourSystem extends createSystem({
       this.playVoiceClip(clip);
       return;
     }
-    // 2) browser speech (desktop / emulator). Only the dynamic "I heard
-    // ..." line reaches here - its text varies, so it has no clip. Log it
-    // so a line with no clip is visible instead of silently falling back.
+    // 2) browser speech (desktop / emulator / phone browser). Only the
+    // dynamic "I heard ..." line reaches here - its text varies, so it
+    // has no clip. Log it so a line with no clip is visible instead of
+    // silently falling back.
     log('voice: no clip for line, speech fallback:', text);
+    this.speakFallback(text, opts);
+  }
+
+  /** The browser-voice fallback (speechSynthesis): used when a line has
+   * no pre-recorded clip, and by the tutorial when a clip's play() was
+   * refused on a phone (see the update loop) - the words still come, in
+   * the system voice, instead of silence. Silent on the Quest, which
+   * has no speech engine. */
+  private speakFallback(
+    text: string,
+    opts?: { rate?: number; pitch?: number },
+  ): void {
     try {
       if (!('speechSynthesis' in window)) return;
       if (this.speakTimer !== null) clearTimeout(this.speakTimer);
@@ -3999,6 +4936,43 @@ export class TourSystem extends createSystem({
     } catch (e) {
       log('speech unavailable', e);
       this.speaking = false;
+    }
+  }
+
+  /** Prime one voice clip inside a tap (user gesture): create its Audio
+   * element and play it muted, then pause it at the start. A phone
+   * browser only lets an audio element play after it has played in a
+   * gesture - without this, a clip first played from a timer (the
+   * tutorial lines) is refused and stays silent. Best-effort: a refused
+   * prime just leaves the element unprimed. */
+  private primeVoiceClip(file: string): void {
+    try {
+      let audio = this.clipAudios.get(file);
+      if (!audio) {
+        audio = new Audio();
+        audio.preload = 'auto';
+        audio.src = `${import.meta.env.BASE_URL}audio/voice/${file}`;
+        this.clipAudios.set(file, audio);
+      }
+      audio.muted = true;
+      const p = audio.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+          } catch {
+            /* already stopped */
+          }
+          audio.muted = false;
+        }).catch(() => {
+          audio.muted = false;
+        });
+      } else {
+        audio.muted = false;
+      }
+    } catch {
+      /* priming is best-effort; the timer retry covers a refused play */
     }
   }
 
@@ -4062,12 +5036,14 @@ export class TourSystem extends createSystem({
     }
   }
 
-  /** Speak + show the first short sentence on the panel. */
+  /** Say it on ONE screen only (Bhanu 2026-11-18): Milo talks in the
+   * little "MILO SAYS" bubble beside him - and nowhere else. The tour
+   * panel used to repeat his words underneath it, a second
+   * Milo-talking screen saying the same thing, so the panel keeps its
+   * own phase line (place, choices, buttons) and never echoes his
+   * speech. (The guard-line sayOnce already worked this way.) */
   private say(text: string): void {
     this.speak(text);
-    const first = text.split('. ')[0] ?? text;
-    const short = first.length > 110 ? `${first.slice(0, 107)}...` : first;
-    this.setLine(/[.!?]$/.test(short) ? short : `${short}.`);
   }
 
   /** Say a guard line exactly ONCE. At the Welcome screen the bubble
@@ -4093,6 +5069,13 @@ export class TourSystem extends createSystem({
     const short = first.length > 90 ? `${first.slice(0, 87)}...` : first;
     const shown = /[.!?]$/.test(short) ? short : `${short}.`;
     this.bubbleText = shown;
+    // keep the debug hook current at once: syncComponent only runs on
+    // state changes, so a line spoken between two syncs (e.g. the
+    // "Nice one! Want another photo?" line after a photo) would
+    // otherwise never reach window.__tour
+    const w = window as unknown as Record<string, unknown>;
+    const dbg = w.__tour as Record<string, unknown> | undefined;
+    if (dbg) dbg.bubbleText = shown;
     this.setEl('bubble-text', { text: shown });
     this.speechBubble.visible = true;
   }
@@ -4366,15 +5349,39 @@ export class TourSystem extends createSystem({
     if (/left/.test(heard)) return this.requestTurn('left');
     if (/right/.test(heard)) return this.requestTurn('right');
     if (/nearby|famous/.test(heard)) return this.nearbyPlaces();
+    // "cheese" - the photo cue (Bhanu 2026-11-18): during a selfie (or
+    // any photo moment) she says "cheese" to take the picture - it is
+    // only the shutter, never a place name or a command, so it returns
+    // before every other rule and never reaches the "I heard..."
+    // fallback. Outside a photo moment it does nothing at all.
+    if (/\bcheese\b/.test(heard)) {
+      if (this.phase === 'photopick' || this.phase === 'arrived')
+        return this.takePhotoNow();
+      return;
+    }
     // "selfie" - Milo comes close beside her, then the photo (Bhanu
     // 2026-11-17 22:27). Before "photo": "take a selfie" has no "photo"
     // in it, but the order keeps the two modes from ever colliding.
     if (/selfie/.test(heard)) return this.takeSelfie();
+    // "another photo" (Bhanu 2026-11-18): after a photo she stays at
+    // the destination - this starts the next one. Before the generic
+    // "photo" rule, so it reads as a continuation, not a new visit.
+    if (/another photo|one more photo|take another/.test(heard)) {
+      if (this.phase === 'arrived' || this.phase === 'photopick') return this.takePhoto();
+      return;
+    }
     // "photo" - back to photo mode (the place is the star), then the
     // photo as before
     if (/photo|picture/.test(heard)) {
       if (this.photoMode !== 'photo') this.setPhotoMode('photo');
       return this.takePhoto();
+    }
+    // hold-to-confirm (Bhanu 2026-11-18 07:25): "yes" sends the held
+    // souvenir to the Journal, "no" keeps it in her hand - only while
+    // Milo is asking, so a stray "yes" never sends anything on its own
+    if (this.holdConfirmShown) {
+      if (/\byes\b/.test(heard)) return this.confirmJournalYes();
+      if (/\bno\b/.test(heard)) return this.confirmJournalNo();
     }
     // "send it to the journal" - the tap-free way to save a held
     // souvenir (Bhanu 2026-11-17 22:18)
@@ -4572,9 +5579,11 @@ export class TourSystem extends createSystem({
     this.heldObject = id;
     const name = SOUVENIR_NAMES[id] ?? 'souvenir';
     if (this.phase === 'photopick') {
-      // the photo moment: she holds it for the picture
+      // the photo moment: she holds it for the picture. ONE
+      // Milo-talking screen (Bhanu 2026-11-18): the bubble says
+      // "You're holding the ...! Say cheese!" - the panel keeps
+      // "Photo at ..." and is not a second copy of his words.
       this.photoObject = id;
-      this.setLine(`You're holding the ${name}! Say cheese!`);
       this.speak(`You're holding the ${name}! Say cheese!`);
       log('souvenir grabbed for photo:', id);
       // a beat to enjoy holding it, then the countdown
@@ -4590,6 +5599,10 @@ export class TourSystem extends createSystem({
     // chest) - drop it near the ring, or tap Send to Journal.
     this.setLine(`You're holding the ${name}! Drop it in the glowing ring to save it, or put it down anywhere.`);
     this.speak(GRAB_NICE_LINE);
+    // hold-to-confirm: the 2-second hold starts now - keep holding
+    // and Milo will ask if it goes to the Journal
+    this.holdStartMs = performance.now();
+    this.holdConfirmDeclined = false;
     this.refreshUI();
     log('souvenir grabbed and placed:', id);
   }
@@ -4598,6 +5611,9 @@ export class TourSystem extends createSystem({
   private onObjectReleased(id: string): void {
     if (this.phase !== 'arrived') return;
     if (this.heldObject !== id) return;
+    // letting go ends the hold: the question closes (she is not
+    // holding it any more) and the ring goes away
+    this.clearHoldConfirm();
     // tossed at the Journal ring? If she let go within close reach of
     // the glowing ring, the souvenir flies to the ring and is saved in
     // her tour Journal instead of staying where she dropped it. The
@@ -4680,18 +5696,85 @@ export class TourSystem extends createSystem({
     this.onObjectReleased(id);
   }
 
+  /** Test hook (autotest only): pretend she held the souvenir for the
+   * full 2 seconds - the confirm panel appears on the next frame. */
+  private simulateHoldElapsed(): void {
+    if (this.holdStartMs !== null) this.holdStartMs = performance.now() - HOLD_CONFIRM_MS - 50;
+  }
+
   /**
    * Capture the rider's current view as a PNG data URL.
-   * The renderer's canvas cannot be read after the frame: its buffer is
-   * cleared, and in XR it renders to the headset, not the canvas. So we
-   * render the scene once, synchronously, to the canvas and read it in
-   * the same task - the pixels are only valid until this task yields.
+   * The old path rendered to the canvas and read canvas.toDataURL -
+   * but in an immersive XR session the WebGL canvas is presented to
+   * the headset (and preserveDrawingBuffer is false), so the readback
+   * came back blank on a real Quest even though the emulator said
+   * "Photo taken" (Bhanu 2026-11-18: no selfie, no photos on Quest).
+   * So the photo is rendered once, synchronously, into an OFFSCREEN
+   * render target and read back with readRenderTargetPixels - a path
+   * that works while presenting in XR and in the flat simulator alike
+   * - then flipped into a 2D canvas and encoded. The canvas path stays
+   * only as a fallback. The capture is measured (data URL length +
+   * pixel variance - a blank frame has neither), so the autotest can
+   * prove a real image was produced.
    */
   private capturePhoto(): string {
     const renderer = this.world.renderer;
     const camera = this.world.camera;
     const canvas = renderer.domElement;
-    // render to the canvas, not the XR headset layer, for this one frame
+    const w = 1024;
+    const h = 768;
+    try {
+      if (!this.captureTarget) {
+        this.captureTarget = new WebGLRenderTarget(w, h);
+        this.captureBuffer = new Uint8Array(w * h * 4);
+      }
+      const target = this.captureTarget;
+      const buffer = this.captureBuffer;
+      if (!target || !buffer) throw new Error('capture target not ready');
+      // render to the target, not the XR headset layer, for this one frame
+      const xrEnabled = renderer.xr.enabled;
+      renderer.xr.enabled = false;
+      const prevAspect = camera.aspect;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+      renderer.setRenderTarget(target);
+      renderer.render(this.world.scene, camera);
+      renderer.setRenderTarget(null);
+      renderer.readRenderTargetPixels(target, 0, 0, w, h, buffer);
+      camera.aspect = prevAspect;
+      camera.updateProjectionMatrix();
+      renderer.xr.enabled = xrEnabled;
+      // the frame is not one flat colour: sample the pixels (a blank
+      // capture has zero variance, however big its data URL is)
+      let min = 255;
+      let max = 0;
+      for (let i = 0; i < buffer.length; i += 401 * 4) {
+        const v = buffer[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      this.lastCaptureVariance = max - min;
+      // readRenderTargetPixels is bottom-up; flip into a 2D canvas
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d');
+      if (!ctx) throw new Error('no 2d context for photo');
+      const img = ctx.createImageData(w, h);
+      const dst = img.data;
+      for (let y = 0; y < h; y++) {
+        const srcRow = (h - 1 - y) * w * 4;
+        dst.set(buffer.subarray(srcRow, srcRow + w * 4), y * w * 4);
+      }
+      ctx.putImageData(img, 0, 0);
+      const url = c.toDataURL('image/png');
+      this.lastCaptureBytes = url.length;
+      return url;
+    } catch (e) {
+      log('capture target failed, canvas fallback', e);
+    }
+    // fallback: the old canvas path (flat simulator only, in practice)
     const xrEnabled = renderer.xr.enabled;
     renderer.xr.enabled = false;
     const prevAspect = camera.aspect;
@@ -4703,10 +5786,15 @@ export class TourSystem extends createSystem({
     camera.aspect = prevAspect;
     camera.updateProjectionMatrix();
     renderer.xr.enabled = xrEnabled;
+    this.lastCaptureBytes = url.length;
+    this.lastCaptureVariance = 0;
     return url;
   }
 
-  /** The 3-2-1 countdown + snapshot, then the thank-you closes the visit. */
+  /** The 3-2-1 countdown + snapshot, then STAY at the destination in
+   * photo mode (Bhanu 2026-11-18): one photo must not end the visit -
+   * Milo asks for another one, and the visit only ends when she says
+   * so (I'm done / take me... / Where next?). */
   private takePhotoNow(): void {
     if (this.phase !== 'photopick' && this.phase !== 'arrived') return;
     // one grab (or one double-tap on Photo) takes exactly one photo:
@@ -4747,11 +5835,23 @@ export class TourSystem extends createSystem({
           // free her hand, so every button works again (a held object
           // blocks fingertip pokes)
           this.releaseHeldSouvenir();
-          // a selfie leaves Milo beside her - back in front now, so
-          // the thank-you finds him where she expects him
+          // a selfie leaves Milo beside her - back in front now
           this.restoreMiloFromSelfie();
-          // the photo is done - the visit's last step is the thank-you
-          setTimeout(() => this.sayThankYou(), 2000);
+          // selfie mode is one-shot per visit (Bhanu 2026-11-18): the
+          // mode toggle hides while in selfie mode (it would read
+          // "Photo", a duplicate), so the mode returns to photo once
+          // the selfie is taken - the toggle comes back for the next
+          // visit. Silent: no extra line over the "Photo taken" one.
+          this.photoMode = 'photo';
+          // STAY at the destination in photo mode (Bhanu 2026-11-18):
+          // one photo must not end the visit - she takes 2-3 photos
+          // at one place. The Photo button now reads "Another photo",
+          // and the visit only ends when she says so (I'm done / take
+          // me... / Where next?).
+          this.photosAtPlace++;
+          this.photoInProgress = false;
+          this.setPhase('arrived');
+          this.say(PHOTO_AGAIN_LINE);
         } catch (e) {
           log('photo error', e);
           this.photoInProgress = false;
@@ -4842,12 +5942,20 @@ export class TourSystem extends createSystem({
       String(this.driving),
       String(this.historyTold),
       String(this.photos),
+      String(this.photoMode),
       String(this.selfDriving),
       this.journalSummary(),
       String(posXr),
       String(posZr),
       String(headingDegr),
       String(liftR),
+      // tutorial + audio state, so the debug hook stays current while
+      // the intro lines rotate (no phase change happens between lines)
+      String(this.introLineIdx),
+      String(this.lastClipPlayed),
+      String(this.lastClipPlayOk),
+      String(this.lastClipError),
+      String(this.musicMaster ? this.musicMaster.gain.value : 'null'),
     ].join('|');
     if (!force && want === this.lastSeen) return;
     try {
@@ -4877,6 +5985,7 @@ export class TourSystem extends createSystem({
       dbg.driving = this.driving;
       dbg.historyTold = this.historyTold;
       dbg.photos = this.photos;
+      dbg.photoMode = this.photoMode;
       dbg.posX = Math.round(this.pos.x * 10) / 10;
       dbg.posZ = Math.round(this.pos.z * 10) / 10;
       dbg.headingDeg = Math.round((this.heading * 180) / Math.PI);
@@ -4890,6 +5999,8 @@ export class TourSystem extends createSystem({
       dbg.pendingClip = this.pendingClip;
       dbg.miloOut = this.miloOut;
       dbg.heldObject = this.heldObject;
+      dbg.holdConfirmShown = this.holdConfirmShown;
+      dbg.holdRingVisible = this.holdRing?.visible ?? false;
       dbg.photoObject = this.photoObject;
       dbg.selfDriving = this.selfDriving;
       dbg.journal = this.journalSummary();
@@ -4904,8 +6015,11 @@ export class TourSystem extends createSystem({
       dbg.greeting = GREETING;
       dbg.line = this.currentLine;
       dbg.sub = this.currentSub;
+      dbg.bubbleText = this.bubbleText;
       dbg.introStartMs = Math.round(this.introStartMs);
       dbg.introEndMs = Math.round(this.introEndMs);
+      dbg.introLineIdx = this.introLineIdx;
+      dbg.musicGain = this.musicMaster ? this.musicMaster.gain.value : null;
       dbg.shownButtons = [...this.shownButtons];
       dbg.visited = [...this.visited];
     }
@@ -4975,6 +6089,7 @@ export class TourSystem extends createSystem({
       driving: this.driving,
       historyTold: this.historyTold,
       photos: this.photos,
+      photoMode: this.photoMode,
       posX: this.pos.x,
       posZ: this.pos.z,
       headingDeg: (this.heading * 180) / Math.PI,
@@ -5000,6 +6115,10 @@ export class TourSystem extends createSystem({
       voskReady: this.voskModel !== null,
       introStartMs: Math.round(this.introStartMs),
       introEndMs: Math.round(this.introEndMs),
+      introLineIdx: this.introLineIdx,
+      lastClipPlayed: this.lastClipPlayed,
+      lastClipPlayOk: this.lastClipPlayOk,
+      musicGain: this.musicMaster ? this.musicMaster.gain.value : null,
       shownButtons: [...this.shownButtons],
       visited: [...this.visited],
     };
@@ -5066,6 +6185,10 @@ export class TourSystem extends createSystem({
     this.journalFlyId = null;
     this.hideTurnArrow();
     if (this.journalArc) this.journalArc.visible = false;
+    this.holdStartMs = null;
+    this.holdConfirmShown = false;
+    this.holdConfirmDeclined = false;
+    if (this.holdRing) this.holdRing.visible = false;
     this.city.visible = false;
     this.carObj.visible = false;
     this.cityRevealed = false;
@@ -5245,6 +6368,9 @@ export class TourSystem extends createSystem({
           hasLandmark('statueLiberty'),
       );
       // ---- tap: the Enter panels must be within arm's reach in XR ----
+      // screens farther away (Bhanu 2026-11-18): the tour panel now
+      // sits ~1.05 m ahead out of the car, ~1.0 m in it - still within
+      // easy reach of a tap, just not in her face
       check('enterPanelsWithinReach', () => {
         if (!this.titlePanel || !this.tourPanel) return false;
         const head = this.headPos();
@@ -5252,7 +6378,7 @@ export class TourSystem extends createSystem({
         const dTitle = this.tmpPos.distanceTo(head);
         this.tourPanel.getWorldPosition(this.tmpPos);
         const dTour = this.tmpPos.distanceTo(head);
-        return dTitle < 1.0 && dTour < 1.0;
+        return dTitle < 1.0 && dTour < 1.3;
       });
       // ---- every panel at EYE LEVEL (a seated rider can see + tap it) ----
       check('panelsAtEyeLevel', () => {
@@ -5262,7 +6388,12 @@ export class TourSystem extends createSystem({
         const titleDy = Math.abs(this.tmpPos.y - head.y);
         this.tourPanel.getWorldPosition(this.tmpPos);
         const tourDy = Math.abs(this.tmpPos.y - head.y);
-        return titleDy < 0.15 && tourDy < 0.15;
+        // on the Welcome screen the thumbnail is up and the title
+        // panel sits lower so the two buttons land on the street in
+        // the picture, not over Milo's face - still comfortably in
+        // view, ~18° below eye level
+        const titleBand = this.welcomeTitleHidden ? 0.35 : 0.15;
+        return titleDy < titleBand && tourDy < 0.15;
       });
       // ---- panels must be IN FRONT of her head (D1: they were behind) ----
       check('panelsInFrontOfHead', panelsInFront);
@@ -5294,6 +6425,15 @@ export class TourSystem extends createSystem({
         'musicLoopPlays',
         () => this.musicPlaying === true && this.musicNotesPlayed >= 1,
       );
+      // music softer (Bhanu 2026-11-18: 0.12 was a bit loud on her phone)
+      // - tolerance, not === : gain.value is a float32 (0.08 stores as
+      // 0.07999999821186066), never exactly the float64 literal
+      check(
+        'musicSofter',
+        () =>
+          this.musicMaster !== null &&
+          Math.abs(this.musicMaster.gain.value - MUSIC_GAIN) < 0.001,
+      );
       check('musicMuteWorks', () => {
         const before = this.musicMuted;
         clickBtn('btn-music');
@@ -5315,10 +6455,61 @@ export class TourSystem extends createSystem({
       await wait(300);
       check('startTutorialStartsXR', () => tutXrAsked >= 1 && this.phase === 'tutorial');
       this.ensureXR = realEnsureXR2;
-      // ---- tutorial: a real 10-20 s intro, then Skip / Restart ----
+      // ---- tutorial: one continuous take, ~12 s, all 4 lines ----
+      // (Bhanu 2026-11-18: it must fit one recording, back-to-back,
+      // no dead time - line 2 at ~3.1 s, line 3 at ~5.7 s, each clip
+      // actually sounding; on her phone only the first line played)
       this.startTutorial();
       await wait(300);
       check('tutorialIntroRuns', () => this.phase === 'tutorial');
+      // "MILO SAYS" lives on the bubble ONLY (Bhanu 2026-11-18): the
+      // panel eyebrow is just the phase name now, never a second
+      // Milo-speech label - and the controls sit close to centre, so
+      // Skip is straight ahead with Milo, no head-turn to find it
+      check('singleMiloSays', () => this.currentSub === 'TUTORIAL');
+      check('tutorialPanelCentred', () => {
+        const head = this.headPos();
+        const panel = this.tourPanel;
+        if (!panel) return false;
+        const fwd = this.headLookDir(this.tmpFwd);
+        const right = this.tmpRight;
+        right.set(-fwd.z, 0, fwd.x);
+        const dx = panel.position.x - head.x;
+        const dz = panel.position.z - head.z;
+        return Math.abs(dx * right.x + dz * right.z) <= 0.4;
+      });
+      await wait(3600);
+      check(
+        'tutorialLineTwoPlays',
+        () =>
+          this.introLineIdx >= 1 &&
+          this.lastClipPlayed === 'intro-2.mp3' &&
+          this.lastClipPlayOk === true,
+      );
+      await wait(2600);
+      check(
+        'tutorialLineThreePlays',
+        () =>
+          this.introLineIdx >= 2 &&
+          this.lastClipPlayed === 'intro-3.mp3' &&
+          this.lastClipPlayOk === true,
+      );
+      // Skip is visible from line 1 (Bhanu 2026-11-18): tapping it
+      // mid-tutorial goes straight back to the main screen - and
+      // starting the tutorial again replays it from line 1
+      check('tutorialSkipShownFromLineOne', () => this.shownButtons.includes('btn-skip'));
+      clickBtn('btn-skip');
+      await wait(300);
+      check('tutorialSkipFromLineOneWorks', () => this.phase === 'enter');
+      await waitFor(() => this.enterButtonsShown, 5000);
+      clickBtn('btn-start-tutorial');
+      await wait(300);
+      check(
+        'tutorialRestartsAfterSkip',
+        () => this.phase === 'tutorial' && this.introLineIdx === 0,
+      );
+      this.fastForwardIntro();
+      await waitFor(() => this.phase === 'tutdone', 10000);
       // Milo's front face: two blue irises (left + right) and a smile,
       // all on the -Z face - the front proof must show both eyes + smile
       check('miloFaceFront', () => {
@@ -5344,7 +6535,9 @@ export class TourSystem extends createSystem({
       await waitFor(() => this.phase === 'tutdone', 25000);
       check('tutorialIntroDuration', () => {
         const d = this.introEndMs - this.introStartMs;
-        return this.phase === 'tutdone' && d >= 10000 && d <= 21000;
+        // one take, ~12 s: long enough for all 4 clips to play whole,
+        // short enough to record in one go
+        return this.phase === 'tutdone' && d >= 10000 && d <= 13000;
       });
       check('skipRestartShown', () => buttonsAre(['btn-skip', 'btn-restart']));
       // Restart / Skip through the BUTTONS (not the methods): Bhanu
@@ -5364,6 +6557,15 @@ export class TourSystem extends createSystem({
       clickBtn('btn-skip');
       await wait(300);
       check('skipTutorialWorks', () => this.phase === 'enter');
+      // Journal empty state (Bhanu 2026-11-18): with nothing saved yet
+      // the book says so, and the eyebrow carries no "PAGE 1 OF 0"
+      check(
+        'journalEmptyState',
+        () =>
+          this.journal.length === 0 &&
+          this.journalPageText().includes('Nothing saved yet') &&
+          this.journalPageSub() === 'MY TRAVEL JOURNAL',
+      );
       // Skip goes DIRECTLY back to the main screen (Start tutorial /
       // Start the game) - not into the game, not into the tutorial
       check(
@@ -5378,6 +6580,28 @@ export class TourSystem extends createSystem({
       // tapping, or the tap lands on a hidden box
       await waitFor(() => this.enterButtonsShown, 5000);
       check('welcomeBoxesAppearAfter2s', () => this.enterButtonsShown);
+      // the welcome screen (Bhanu 2026-11-18): the thumbnail is the
+      // first screen, title + two buttons centred straight ahead at
+      // eye level, aligned to her forward - no head-turn to find them
+      check('welcomeCentredInFront', () => {
+        const head = this.headPos();
+        const panel = this.titlePanel;
+        if (!panel) return false;
+        const dx = panel.position.x - head.x;
+        const dz = panel.position.z - head.z;
+        const dist = Math.hypot(dx, dz);
+        const fwd = this.headLookDir(this.tmpFwd);
+        const dot = (dx * fwd.x + dz * fwd.z) / Math.max(0.001, dist);
+        return dist >= 0.8 && dist <= 1.1 && dot > 0.98;
+      });
+      await waitFor(() => this.welcomeBgImg?.complete === true, 5000);
+      check('welcomeThumbnailShown', () => {
+        if ((this.welcomeBg?.visible ?? false) !== true) return false;
+        const mat = this.welcomeBg?.material as unknown as
+          | MeshBasicMaterial
+          | undefined;
+        return mat?.map != null;
+      });
       // start the game from the main screen: the conversation phase
       clickBtn('btn-start-game');
       await wait(300);
@@ -5385,6 +6609,19 @@ export class TourSystem extends createSystem({
         'startGameFromMain',
         () => this.phase === 'choose' && !this.city.visible && !this.carObj.visible,
       );
+      // the thumbnail stays on the Welcome screen only - gone once the
+      // game starts - and Milo stands back now (Bhanu 2026-11-18): at
+      // 1.5 m his head filled her vision; at 2.2 m his whole head and
+      // body fit comfortably in view
+      check('welcomeThumbnailHiddenInGame', () => (this.welcomeBg?.visible ?? true) === false);
+      check('miloStandsBackAtStart', () => {
+        const head = this.headPos();
+        this.miloObj.getWorldPosition(this.tmpPos);
+        const dx = this.tmpPos.x - head.x;
+        const dz = this.tmpPos.z - head.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        return dist >= 2.0 && dist <= 2.4;
+      });
       // the city and the car must be HIDDEN at the place choice, and
       // Milo must be standing in front of her, facing her - the
       // conversation phase, before any place is named
@@ -5663,9 +6900,10 @@ export class TourSystem extends createSystem({
         'readyShown',
         () => this.phase === 'ready' && this.pendingPlace === 'times-square',
       );
-      // ---- car seat height (Bhanu 2026-11-17 22:18): seated on the
-      // Quest her eyes sit ~1.05 m, below Milo's eyes (1.26 m) - the
-      // rig lifts her to 1.32 m in the car, Milo's face at eye level.
+      // ---- car seat height (Bhanu 2026-11-17 22:18, raised 2026-11-18):
+      // seated on the Quest her eyes sit ~1.05 m, below Milo's eyes
+      // (1.26 m) - the rig lifts her to 1.42 m in the car, Milo's face
+      // just below eye level, never towering over her.
       // debugHeadY (autotest only) stands in for the real head height.
       const seatedY = 1.05;
       this.debugHeadY = seatedY;
@@ -5674,7 +6912,7 @@ export class TourSystem extends createSystem({
         'carSeatEyeLevel',
         () =>
           this.seatBoostTarget > 0.2 &&
-          Math.abs(seatedY + this.seatBoost - 1.32) < 0.05 &&
+          Math.abs(seatedY + this.seatBoost - 1.42) < 0.05 &&
           this.seatBoost <= 0.5,
       );
       // a standing head needs no lift
@@ -5683,6 +6921,16 @@ export class TourSystem extends createSystem({
       check('carSeatNoLiftStanding', () => this.seatBoost < 0.05);
       this.debugHeadY = null;
       await wait(300);
+      // ONE Milo-talking screen (Bhanu 2026-11-18): Milo's "Lovely!
+      // Tap Start ride..." lives in the bubble only - the panel shows
+      // the destination, never his words a second time
+      check(
+        'singleMiloTalkingScreen',
+        () =>
+          this.bubbleText.includes('Lovely') &&
+          this.currentLine.includes('Times Square') &&
+          !this.currentLine.includes('Lovely'),
+      );
       // the Start ride button starts the ride, from the button alone
       clickBtn('btn-start-ride');
       await wait(300);
@@ -5708,8 +6956,10 @@ export class TourSystem extends createSystem({
       check(
         'arrivalLineSaid',
         () =>
-          this.currentLine.includes('Here is the destination') &&
-          this.currentLine.includes('Times Square'),
+          // ONE Milo-talking screen (Bhanu 2026-11-18): the arrival
+          // line lives in the bubble - the panel shows the place name
+          this.bubbleText.includes('Here is the destination') &&
+          this.bubbleText.includes('Times Square'),
       );
       // ---- arrival: "here is the destination", then step out together ----
       await waitFor(() => this.phase === 'arrived', 10000);
@@ -5856,6 +7106,65 @@ export class TourSystem extends createSystem({
           this.journal.some((e) => e.souvenirId === 'souvenir-skyscraper') &&
           this.heldObject === null,
       );
+      // ---- hold-to-confirm (Bhanu 2026-11-18 07:25): hold a souvenir
+      // 2 s and Milo asks first - Yes sends it, No keeps it in her
+      // hand. The camera is the free Times Square item (the ball and
+      // the skyscraper are already in the Journal).
+      this.simulateGrab('souvenir-camera');
+      await wait(300);
+      check('holdRingShown', () => this.holdRing?.visible === true);
+      this.simulateHoldElapsed();
+      await waitFor(() => this.holdConfirmShown, 5000);
+      check(
+        'holdConfirmShown',
+        () =>
+          this.holdConfirmShown &&
+          this.currentLine.includes('Send this to the Journal?') &&
+          this.shownButtons.includes('btn-journal-yes') &&
+          this.shownButtons.includes('btn-journal-no'),
+      );
+      // "No" (the button) keeps the souvenir in her hand - nothing
+      // is sent, and the question does not pop up again for this hold
+      clickBtn('btn-journal-no');
+      await wait(300);
+      check(
+        'holdConfirmNoKeepsIt',
+        () =>
+          !this.holdConfirmShown &&
+          this.heldObject === 'souvenir-camera' &&
+          this.journal.length === 2,
+      );
+      // grab it again (a fresh hold asks again) and say "Yes" by
+      // voice: the camera flies to the Journal along the arc
+      this.simulateRelease('souvenir-camera');
+      await wait(300);
+      this.simulateGrab('souvenir-camera');
+      await wait(300);
+      this.simulateHoldElapsed();
+      await waitFor(() => this.holdConfirmShown, 5000);
+      check('holdConfirmShownAgain', () => this.holdConfirmShown);
+      this.handleCommand('yes');
+      await waitFor(() => this.journal.length >= 3, 5000);
+      check(
+        'holdConfirmYesSends',
+        () =>
+          this.journal.length === 3 &&
+          this.journal.some((e) => e.souvenirId === 'souvenir-camera') &&
+          this.heldObject === null &&
+          !this.holdConfirmShown,
+      );
+      // test-only cleanup: take the camera back out of the Journal so
+      // the later checks still see exactly the ball, the skyscraper
+      // and the photo (the Yes path above already proved the send)
+      this.journal = this.journal.filter((e) => e.souvenirId !== 'souvenir-camera');
+      this.journalSavedIds.delete('souvenir-camera');
+      const cam = this.souvenirObjs.find((s) => s.id === 'souvenir-camera');
+      if (cam) {
+        if (cam.homeParent) cam.homeParent.add(cam.obj);
+        cam.obj.position.copy(cam.homePos);
+        cam.obj.quaternion.copy(cam.homeQuat);
+        cam.obj.visible = true;
+      }
       // ---- the Journal view: open it, read the collection, close it ----
       clickBtn('btn-journal');
       await wait(300);
@@ -5867,20 +7176,25 @@ export class TourSystem extends createSystem({
           this.currentLine.includes('Times Square') &&
           this.shownButtons.includes('btn-journal-close'),
       );
-      // the Journal gallery: the saved ball's 3D object is laid out in a
-      // row in front of her, like the open scrapbook in her picture
+      // the Journal page is a FLAT PICTURE pasted on the page (Bhanu
+      // 2026-11-18): the card shows, the 3D model stays hidden in the
+      // book - never floating in it
       check(
-        'journalGalleryShown',
-        () => ball !== undefined && ball.obj.visible === true,
+        'journalFlatCardShown',
+        () => (this.journalCard?.visible ?? false) === true,
+      );
+      check(
+        'journalCardIsFlatNot3D',
+        () => ball !== undefined && ball.obj.visible === false,
       );
       // the Journal opens CLOSE to her (Bhanu 2026-11-17 22:18): the
-      // book panel and the gallery object are both within 1 m of her
+      // book panel and the gallery card are both within 1 m of her
       // head, within easy reach (the gallery used to sit 1.2 m away)
       check('journalCloseToHer', () => {
         const head = this.headPos();
         const panelD = this.tourPanel ? this.tourPanel.position.distanceTo(head) : 99;
-        const galleryD = ball !== undefined ? ball.obj.position.distanceTo(head) : 99;
-        return panelD <= 1.0 && galleryD <= 1.0;
+        const cardD = this.journalCard ? this.journalCard.position.distanceTo(head) : 99;
+        return panelD <= 1.0 && cardD <= 1.0;
       });
       clickBtn('btn-journal-close');
       await wait(300);
@@ -5891,8 +7205,56 @@ export class TourSystem extends createSystem({
       // the gallery hides again on close (the ball goes back to the Journal)
       check(
         'journalGalleryHides',
-        () => ball !== undefined && ball.obj.visible === false,
+        () =>
+          ball !== undefined &&
+          ball.obj.visible === false &&
+          (this.journalCard?.visible ?? true) === false,
       );
+      // ---- seat height (Bhanu 2026-11-18): 1.42 m target, and it
+      // lifts her on foot too now, not only in the car - with Seat up
+      // / Seat down buttons to nudge it herself ----
+      check(
+        'seatButtonsShownAtDestination',
+        () =>
+          this.shownButtons.includes('btn-seat-up') &&
+          this.shownButtons.includes('btn-seat-down'),
+      );
+      // "MILO SAYS" lives on the bubble only: the panel eyebrow never
+      // carries a Milo-speech label, at a destination either
+      check(
+        'noMiloSaysOnPanel',
+        () =>
+          !this.currentSub.includes('MILO SAYS') &&
+          !this.currentSub.includes('MILO IS TALKING'),
+      );
+      this.debugHeadY = 1.05;
+      await waitFor(() => Math.abs(1.05 + this.seatBoost - 1.42) < 0.05, 15000);
+      check(
+        'seatBoostOnFoot',
+        () => this.seatBoost > 0.2 && Math.abs(1.05 + this.seatBoost - 1.42) < 0.05,
+      );
+      const boostBefore = this.seatBoostTarget;
+      clickBtn('btn-seat-up');
+      await wait(300);
+      check(
+        'seatUpRaisesTarget',
+        () => Math.abs(this.seatBoostTarget - (boostBefore + 0.05)) < 0.01,
+      );
+      clickBtn('btn-seat-down');
+      await wait(300);
+      check(
+        'seatDownLowersTarget',
+        () => Math.abs(this.seatBoostTarget - boostBefore) < 0.01,
+      );
+      // clamp: many taps never push the target past 1.60 / 1.15
+      for (let i = 0; i < 10; i++) clickBtn('btn-seat-up');
+      await wait(300);
+      check('seatClampedAtMax', () => this.effectiveSeatTarget() <= 1.6 + 0.001);
+      for (let i = 0; i < 20; i++) clickBtn('btn-seat-down');
+      await wait(300);
+      check('seatClampedAtMin', () => this.effectiveSeatTarget() >= 1.15 - 0.001);
+      this.seatAdjust = 0;
+      this.debugHeadY = null;
       // ---- photo with a grabbed object ----
       this.takePhoto();
       await wait(300);
@@ -5937,16 +7299,27 @@ export class TourSystem extends createSystem({
           rightComp < 0.7
         );
       });
-      // toggle back to photo: he returns to his spot in front
-      clickBtn('btn-selfie');
+      // selfie mode hides the toggle (Bhanu 2026-11-18): in selfie mode
+      // it would read "Photo" - a second Photo button next to the real
+      // one. Exactly one Photo button remains, and it takes the selfie.
+      check(
+        'selfieModeHidesToggle',
+        () =>
+          !this.shownButtons.includes('btn-selfie') &&
+          this.shownButtons.includes('btn-photo'),
+      );
+      // "cheese" is only the shutter (Bhanu 2026-11-18): saying it in
+      // the selfie moment starts the photo - no place, no command, no
+      // "I heard..." fallback
+      this.handleCommand('cheese');
       await wait(300);
       check(
-        'selfieToggleBackWorks',
-        () => this.photoMode === 'photo' && miloInFront(),
+        'cheeseTakesSelfie',
+        () =>
+          this.photoInProgress === true &&
+          this.phase === 'photopick' &&
+          VOSK_GRAMMAR.includes('cheese'),
       );
-      // and back to selfie for the photo itself
-      clickBtn('btn-selfie');
-      await wait(300);
       check('selfieModeForPhoto', () => this.photoMode === 'selfie');
       this.simulateGrab('souvenir-camera');
       await wait(300);
@@ -5973,6 +7346,43 @@ export class TourSystem extends createSystem({
         'souvenirReleasedAfterPhoto',
         () => this.heldObject === null && this.photoObject === 'souvenir-camera',
       );
+      // ---- 2-3 photos at one place (Bhanu 2026-11-18): after ONE
+      // photo Milo asks for another one - the visit does NOT end ----
+      check(
+        'photoStaysAtPlace',
+        () =>
+          this.phase === 'arrived' &&
+          this.photos === 1 &&
+          this.bubbleText.toLowerCase().includes('another photo'),
+      );
+      check('anotherPhotoButtonShown', () => this.shownButtons.includes('btn-photo'));
+      // "another photo" by voice starts the next one
+      this.handleCommand('another photo');
+      await wait(300);
+      check('anotherPhotoStartsPick', () => this.phase === 'photopick');
+      this.handleCommand('cheese');
+      await waitFor(() => this.photos >= 2, 10000);
+      check(
+        'secondPhotoTaken',
+        () =>
+          this.photos === 2 &&
+          this.phase === 'arrived' &&
+          this.journal.filter((e) => e.kind === 'photo').length === 2,
+      );
+      // the XR capture really produced an image (Bhanu 2026-11-18):
+      // a non-empty data URL with real pixel variance - a blank frame
+      // has neither, however big its URL looks
+      check(
+        'xrCaptureProducesImage',
+        () => this.lastCaptureBytes > 20000 && this.lastCaptureVariance > 0,
+      );
+      // test-only cleanup: drop the 2nd photo from the Journal so the
+      // book checks below still see exactly 3 keepsakes (the ball, the
+      // skyscraper, the first photo)
+      const firstPhotoIdx = this.journal.findIndex((e) => e.kind === 'photo');
+      this.journal = this.journal.filter(
+        (e, i) => e.kind !== 'photo' || i === firstPhotoIdx,
+      );
       // the Journal's big photo opens close too (Bhanu 2026-11-17 22:18):
       // the photo page is the last entry; open it big and measure
       this.journalPage = this.journal.findIndex((e) => e.kind === 'photo');
@@ -5986,22 +7396,24 @@ export class TourSystem extends createSystem({
       this.journalPage = 0;
       await wait(200);
       // the selfie is done: Milo is back in front for the thank-you,
-      // and the mode is back to photo for the next visit
+      // and the mode is back to photo for the next visit (the mode
+      // resets when the photo is taken - Bhanu 2026-11-18)
       check(
-        'selfieRestoredAfterPhoto',
-        () => this.photoMode === 'selfie' && miloInFront(),
-      );
-      this.setPhotoMode('photo');
-      check(
-        'selfieModeReset',
+        'selfieModeResetAfterPhoto',
         () => this.photoMode === 'photo' && miloInFront(),
       );
       // ---- thank-you, then the left/right choice ----
+      // the visit ends only when SHE says so now (Bhanu 2026-11-18):
+      // "Where next?" closes the visit - no more auto thank-you after
+      // one photo
+      clickBtn('btn-where');
       await waitFor(() => this.phase === 'thankyou', 10000);
       check(
         'thankYouShown',
         () =>
-          this.currentLine.includes('I loved taking you here') &&
+          // ONE Milo-talking screen: the visit-close line lives in
+          // the bubble - the panel shows "Visit complete!"
+          this.bubbleText.includes('I loved taking you here') &&
           this.shownButtons.includes('btn-thank-milo'),
       );
       // she says thank you back: Milo answers, then the left/right choice
@@ -6025,7 +7437,9 @@ export class TourSystem extends createSystem({
         () =>
           this.suggestion !== null &&
           this.suggestionText.includes("Let's go") &&
-          this.currentLine.includes("Let's go"),
+          // ONE Milo-talking screen: the suggestion lives in the
+          // bubble - the panel asks "Where next?"
+          this.bubbleText.includes("Let's go"),
       );
       // her picture: at Times Square the right choice is the Brooklyn
       // Bridge (not Broadway) - the board must promise it
@@ -6083,6 +7497,63 @@ export class TourSystem extends createSystem({
       });
       // 14 taxis on the avenue now, not 10 (more life on the roads)
       check('taxisCount14', () => this.taxis.length === 14);
+      // panels in front, always (Bhanu 2026-11-18): in Central Park
+      // the tree canopy covered the panel in her video - the panels
+      // are head-locked every frame now, and their materials ignore
+      // depth, so scenery can never paint over them
+      check('panelsDepthTestOff', () => {
+        let ok = true;
+        this.tourPanel?.traverse((o) => {
+          const mat = (o as unknown as { material?: unknown }).material;
+          if (!mat) return;
+          (Array.isArray(mat) ? mat : [mat]).forEach((m) => {
+            const mm = m as { depthTest?: boolean };
+            if (mm && mm.depthTest !== false) ok = false;
+          });
+        });
+        return ok;
+      });
+      check('panelsHeadLockedAtPark', () => {
+        const head = this.headPos();
+        const panel = this.tourPanel;
+        if (!panel) return false;
+        const d = panel.position.distanceTo(head);
+        const fwd = this.headLookDir(this.tmpFwd);
+        const dx = panel.position.x - head.x;
+        const dz = panel.position.z - head.z;
+        const len = Math.hypot(dx, dz) || 1;
+        const dot = (dx * fwd.x + dz * fwd.z) / len;
+        // farther now (Bhanu 2026-11-18): 1.05 m ahead + 0.52 m right
+        // + raised 0.08 m = ~1.17 m from her head, still dead ahead
+        return d <= 1.3 && dot > 0.5;
+      });
+      // the tour panel, farther + bigger + higher (Bhanu 2026-11-18):
+      // ~1.17 m from her head out of the car, raised 0.08 m above eye
+      // level, scaled 0.18 (0.72 m wide)
+      check('panelRaisedFartherBigger', () => {
+        const head = this.headPos();
+        const panel = this.tourPanel;
+        if (!panel) return false;
+        const d = panel.position.distanceTo(head);
+        const dy = panel.position.y - head.y;
+        const s = panel.scale.x;
+        return d > 1.0 && d < 1.3 && dy > 0.05 && dy < 0.12 && s > 0.17 && s < 0.19;
+      });
+      // the bubble, farther + bigger + higher too: 1.05 m ahead,
+      // 0.55 m above eye level, scale 0.26 - the one Milo-talking
+      // screen, easy to read without leaning in
+      check('bubbleRaisedFartherBigger', () => {
+        const head = this.headPos();
+        const b = this.speechBubble;
+        if (!b || !b.visible) return false;
+        const fwd = this.headLookDir(this.tmpFwd);
+        const dx = b.position.x - head.x;
+        const dz = b.position.z - head.z;
+        const fwdDist = dx * fwd.x + dz * fwd.z;
+        const dy = b.position.y - head.y;
+        const s = b.scale.x;
+        return fwdDist > 0.95 && fwdDist < 1.15 && dy > 0.45 && dy < 0.65 && s > 0.25 && s < 0.27;
+      });
       check('roadFollowingLeft', trailOnRoad);
       // ---- Central Park visit ends without a photo: Where next? -> thank-you -> next ----
       this.finishVisit();
@@ -6187,6 +7658,12 @@ export class TourSystem extends createSystem({
           this.currentSub.includes('PAGE 3 OF 3') &&
           this.shownButtons.includes('btn-journal-prev') &&
           this.shownButtons.includes('btn-journal-open-photo'),
+      );
+      // the photo page is a FLAT picture too (Bhanu 2026-11-18): the
+      // photo pasted on its card, not a floating 3D object
+      check(
+        'journalPhotoPageFlat',
+        () => (this.journalCard?.visible ?? false) === true,
       );
       clickBtn('btn-journal-open-photo');
       await wait(500);
@@ -6313,9 +7790,10 @@ export class TourSystem extends createSystem({
       check(
         'nextPlacesListed',
         () =>
-          this.currentLine.includes('Times Square') &&
-          this.currentLine.includes('Central Park') &&
-          this.currentLine.includes('Statue of Liberty'),
+          // ONE Milo-talking screen: the list lives in the bubble
+          this.bubbleText.includes('Times Square') &&
+          this.bubbleText.includes('Central Park') &&
+          this.bubbleText.includes('Statue of Liberty'),
       );
       // ---- "I'll drive" at a destination - pick the next place first,
       // then she can drive; the flow continues ----
@@ -6324,7 +7802,8 @@ export class TourSystem extends createSystem({
       check(
         'selfDriveAnswered',
         () =>
-          this.currentLine.includes('pick where to go next first') &&
+          // ONE Milo-talking screen: the answer lives in the bubble
+          this.bubbleText.includes('pick where to go next first') &&
           this.phase === 'arrived',
       );
       // ---- stop mid-drive ----
@@ -6502,7 +7981,9 @@ export class TourSystem extends createSystem({
       // road at the junction ahead
       clickBtn('btn-turn-left');
       await wait(500);
-      check('turnLineSaid', () => this.currentLine.includes('Turning left'));
+      // ONE Milo-talking screen: the turn confirmation lives in the
+      // bubble - the panel keeps showing the drive status
+      check('turnLineSaid', () => this.bubbleText.includes('Turning left'));
       check('turnArrowShown', () => this.turnArrow?.visible === true);
       await wait(3000);
       check('midDriveTurnLeft', () => this.sawWest && this.driving);
@@ -6556,7 +8037,9 @@ export class TourSystem extends createSystem({
         'goodbyeShown',
         () =>
           this.phase === 'goodbye' &&
-          this.currentLine.includes('I loved taking you around New York'),
+          // ONE Milo-talking screen: his thank-you lives in the
+          // bubble - the panel says "Thank you!"
+          this.bubbleText.includes('I loved taking you around New York'),
       );
       // Milo's thank-you, then her Journal opens on the goodbye screen
       await waitFor(() => this.journalOpen, 10000);
@@ -6622,6 +8105,12 @@ export class TourSystem extends createSystem({
     }
     // keep Milo's speech bubble floating beside his head
     this.positionBubble();
+    // panels head-locked, every frame (Bhanu 2026-11-18): they used to
+    // re-aim only on phase changes, so turning her head left a tree
+    // between her and the panel in Central Park. Now they float a short
+    // distance ahead of her viewpoint, always - scenery can never get
+    // between her eyes and a panel 0.85 m ahead.
+    this.placePanelsInFront();
 
     // ---- Welcome screen: the two boxes appear 2 s after the title ----
     // (wall clock: slow frames can't stall it; the boxes start hidden
@@ -6672,13 +8161,50 @@ export class TourSystem extends createSystem({
       if (elapsedMs >= INTRO_MS) {
         this.showTutDone();
       } else {
-        const idx = Math.min(INTRO_LINES.length - 1, Math.floor(elapsedMs / 5000));
+        // one continuous take: each line's dwell matches its recorded
+        // clip (INTRO_LINE_MS), so the lines follow back-to-back with
+        // no long gap and no word cut off (see the INTRO_LINE_MS note)
+        let idx = INTRO_LINES.length - 1;
+        let acc = 0;
+        for (let i = 0; i < INTRO_LINE_MS.length; i++) {
+          acc += INTRO_LINE_MS[i];
+          if (elapsedMs < acc) {
+            idx = i;
+            break;
+          }
+        }
         if (idx !== this.introLineIdx) {
           this.introLineIdx = idx;
-          this.setLine(INTRO_LINES[idx], 'MILO IS TALKING');
+          this.introLineSpokenAtMs = now;
+          this.introLineRetryAtMs = 0;
+          this.introLineFallbackDone = false;
+          this.setLine(INTRO_LINES[idx], 'TUTORIAL');
           // each rule is spoken as it appears, so the bubble beside him
           // is the live transcript of what he is saying
           this.speak(INTRO_LINES[idx]);
+        } else {
+          // the line's clip plays from this timer, not a tap: on a phone
+          // the browser can refuse play() there, and the old code never
+          // retried - the line stayed silent. Retry once a second, and
+          // after 3 s fall back to the browser voice so the words come
+          // (once per line; the fallback stops the retries, so the two
+          // voices never speak over each other)
+          const file = VOICE_BY_TEXT[INTRO_LINES[idx]];
+          if (
+            file &&
+            this.lastClipPlayed === file &&
+            !this.lastClipPlayOk &&
+            this.lastClipError &&
+            !this.introLineFallbackDone
+          ) {
+            if (now - this.introLineSpokenAtMs > 3000) {
+              this.introLineFallbackDone = true;
+              this.speakFallback(INTRO_LINES[idx]);
+            } else if (now >= this.introLineRetryAtMs) {
+              this.introLineRetryAtMs = now + 1000;
+              this.playVoiceClip(file);
+            }
+          }
         }
       }
     }
@@ -6774,6 +8300,9 @@ export class TourSystem extends createSystem({
 
     // ---- glowing Journal arc: from a held souvenir to the ring ----
     this.updateJournalArc();
+
+    // ---- hold-to-confirm ring: fills while she holds a souvenir ----
+    this.updateHoldConfirm();
 
     // ---- Journal ring close to her + car seat height ----
     this.updateJournalRing();
