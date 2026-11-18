@@ -917,7 +917,7 @@ export class TourSystem extends createSystem({
   private els: Record<string, UiEl | null> = {};
 
   // --- tour state (internal authority; mirrored to TourState) ---
-  private phase = 'choose';
+  private phase = 'enter';
   // Welcome screen: the two boxes appear 2 s after the title (wall
   // clock, so slow frames can't stall it)
   private place = 'start';
@@ -1220,6 +1220,11 @@ export class TourSystem extends createSystem({
   // --- thank-you + left/right "where next" ---
   private thankYouShown = false;
   private thankYouTimer: ReturnType<typeof setTimeout> | null = null;
+  // --- Welcome screen: the two boxes appear exactly 2 s after the
+  // title (Bhanu 2026-11-18 12:50: the boxes are mandatory, the photo
+  // is out) ---
+  private welcomeTimer: ReturnType<typeof setTimeout> | null = null;
+  private welcomeButtonsShown = false;
   // --- "I'm done": the end of the whole tour (Bhanu 2026-11-17) ---
   private goodbyeTimer: ReturnType<typeof setTimeout> | null = null;
   private nextLeft: { node: NodeId; destNode: NodeId; destPlace: string } | null = null;
@@ -1593,11 +1598,14 @@ export class TourSystem extends createSystem({
     // the bubble only appears once she enters the game (Milo is there)
     if (this.speechBubble) this.speechBubble.visible = false;
     this.wirePanel(this.speechBubble, {});
-    // the Welcome title panel is unused now (Bhanu 2026-11-18 11:56:
-    // the whole welcome screen is removed - entry goes straight to
-    // the game), so it wires no buttons; the file stays in place so
-    // the scene manifest still resolves
-    this.wirePanel(this.titlePanel, {});
+    // the Welcome title panel: title first, then the two boxes after
+    // 2 s (Bhanu 2026-11-18 12:50: the boxes are mandatory, the photo
+    // is out - plain background, no image anywhere). Tapping a box
+    // starts XR directly, no Enter XR step.
+    this.wirePanel(this.titlePanel, {
+      'btn-start-tutorial': () => this.startTutorial(),
+      'btn-start-game': () => this.enterGame(),
+    });
     this.wirePanel(this.tourPanel, {
       'btn-next': () => this.onNext(),
       'btn-tutorial': () => this.startTutorial(),
@@ -1637,8 +1645,9 @@ export class TourSystem extends createSystem({
       'btn-where': () => this.finishVisit(),
       'btn-im-done': () => this.endTour(),
     });
-    // (No Enter XR step and no welcome screen any more: any tap on
-    // the page starts the XR session itself - see unlockOnPress.)
+    // (No Enter XR step: tapping either Welcome box starts the XR
+    // session itself - see startTutorial / enterGame - and any tap on
+    // the page also starts it, see unlockOnPress.)
 
     // panels in front, always (Bhanu 2026-11-18): the tour panel, the
     // Welcome title and the speech bubble are re-aimed at her head
@@ -1651,9 +1660,9 @@ export class TourSystem extends createSystem({
 
     // any press on the page (mouse / touch, even one that misses a
     // button) unlocks audio, so Milo's voice can play afterwards -
-    // and, now there is no welcome screen, the first tap is also the
-    // way into XR and the music (both need a gesture). ensureXR is
-    // guarded: it launches once, then no-ops while a session runs
+    // and the first tap is also the way into XR and the music (both
+    // need a gesture). ensureXR is guarded: it launches once, then
+    // no-ops while a session runs
     const unlockOnPress = (): void => {
       this.unlockAudio();
       this.ensureXR();
@@ -1750,10 +1759,10 @@ export class TourSystem extends createSystem({
       );
     };
 
-    // entry goes straight to the game (Bhanu 2026-11-18 11:56: the
-    // whole Welcome screen is removed - no title, no cover page, no
-    // thumbnail, no two boxes): Milo asks where to go, mic first
-    this.enterGame();
+    // the Welcome screen (Bhanu 2026-11-18 12:50: exactly like
+    // fix-3b - title + Milo + the two boxes after 2 s - only the
+    // photo is out): Milo asks where to go once she taps a box
+    this.showWelcome();
     this.syncComponent(true);
     log('tour v2.0 ready');
 
@@ -2097,10 +2106,15 @@ export class TourSystem extends createSystem({
   private refreshUI(): void {
     if (!this.tourPanel || !this.titlePanel) return;
     const p = this.phase;
-    // the Welcome title panel is gone (Bhanu 2026-11-18 11:56), so
-    // title-root is always hidden and the tour panel always shows
-    this.setEl('title-root', { display: 'none' });
-    this.setEl('tour-root', { display: 'flex' });
+    // the Welcome screen owns the title panel; every other phase
+    // owns the tour panel - never both at once
+    if (p === 'enter') {
+      this.setEl('title-root', { display: 'flex' });
+      this.setEl('tour-root', { display: 'none' });
+    } else {
+      this.setEl('title-root', { display: 'none' });
+      this.setEl('tour-root', { display: 'flex' });
+    }
     // clear the button list here, before the per-phase shows, or it
     // stays stale from the previous phase (a re-run of the autotest
     // then reads the old buttons)
@@ -2125,7 +2139,16 @@ export class TourSystem extends createSystem({
       this.shownButtons.push(id);
     };
 
-    if (p === 'tutorial') {
+    if (p === 'enter') {
+      // Welcome screen: title alone first; the two boxes appear
+      // exactly 2 s in (showWelcome's timer flips
+      // welcomeButtonsShown and shows the row - refreshUI only
+      // mirrors the flag, so a refresh mid-wait never flashes
+      // the boxes early)
+      this.setEl('enter-buttons', {
+        display: this.welcomeButtonsShown ? 'flex' : 'none',
+      });
+    } else if (p === 'tutorial') {
       // "MILO IS TALKING" used to sit here as the panel eyebrow while
       // the bubble beside him said "MILO SAYS" - the same attribution
       // twice (Bhanu 2026-11-18). The bubble owns "MILO SAYS"; the
@@ -2154,9 +2177,8 @@ export class TourSystem extends createSystem({
       );
       show('btn-mic');
       show('btn-music');
-      // the tutorial stays reachable from here (Bhanu 2026-11-18
-      // 11:56): the Welcome screen is gone, so this small button on
-      // the tour panel is the way back into it
+      // the tutorial stays reachable from here too: the small
+      // Tutorial button on the tour panel restarts it
       show('btn-tutorial');
       show('btn-place-times');
       show('btn-place-park');
@@ -2392,14 +2414,13 @@ export class TourSystem extends createSystem({
     this.startTutorial();
   }
 
-  /** Skip the tutorial: straight back to the game (Bhanu 2026-11-18
-   * 11:56: the Welcome screen is gone, so there is no main screen to
-   * go back to) - Milo asks where to go. From the done screen, and
-   * from line 1 on (Bhanu 2026-11-18): Skip is visible the whole
-   * tutorial, so it must work the whole tutorial. */
+  /** Skip the tutorial: straight back to the Welcome screen
+   * (Bhanu 2026-11-18: Skip returns to the main screen). From the
+   * done screen, and from line 1 on (Bhanu 2026-11-18): Skip is
+   * visible the whole tutorial, so it must work the whole tutorial. */
   private skipTutorial(): void {
     if (this.phase !== 'tutdone' && this.phase !== 'tutorial') return;
-    this.enterGame();
+    this.showWelcome();
   }
 
   /**
@@ -2442,12 +2463,40 @@ export class TourSystem extends createSystem({
   }
 
   /**
-   * Entry into the game (Bhanu 2026-11-18 11:56): there is NO welcome
-   * screen any more - no title, no cover page, no thumbnail, no two
-   * boxes. Loading goes straight here: a conversation with Milo, not
-   * the city yet. XR and music wait for her first tap (both need a
-   * gesture - the page pointerdown handler starts them, and the music
-   * starts here too, as it did from Start the game). Clean slate for
+   * The Welcome screen (Bhanu 2026-11-18 12:50): EXACTLY like
+   * fix-3b - title "Welcome to Travel Tour", Milo standing in front,
+   * and after exactly 2 s the two boxes "Start tutorial" /
+   * "Start game" appear on the same screen. The ONLY change from
+   * fix-3b is the photo is out: plain background, no image anywhere.
+   * Tapping a box starts XR directly (no "enter the game" screen,
+   * no Enter XR step). No city, no car yet - the world stays hidden
+   * until she names a place.
+   */
+  private showWelcome(): void {
+    this.city.visible = false;
+    this.carObj.visible = false;
+    this.cityRevealed = false;
+    this.hideSouvenirs();
+    this.standMiloInFront();
+    if (this.miloObj) this.miloObj.visible = true;
+    if (this.speechBubble) this.speechBubble.visible = false;
+    this.welcomeButtonsShown = false;
+    this.setPhase('enter');
+    if (this.welcomeTimer) clearTimeout(this.welcomeTimer);
+    this.welcomeTimer = setTimeout(() => {
+      this.welcomeTimer = null;
+      this.welcomeButtonsShown = true;
+      if (this.phase === 'enter') {
+        this.setEl('enter-buttons', { display: 'flex' });
+      }
+    }, 2000);
+  }
+
+  /**
+   * Entry into the game: she tapped "Start the game" on the Welcome
+   * screen. A conversation with Milo, not the city yet. XR and music
+   * wait for her first tap (both need a gesture - the Welcome box tap
+   * starts them, and the music starts here too). Clean slate for
    * the city, like the old Welcome return did (2026-11-17 18:17 bug):
    * the next place named reveals the city again, never a black world.
    */
@@ -2962,9 +3011,9 @@ export class TourSystem extends createSystem({
     this.hideJournalGallery();
     if (this.phase === 'goodbye') {
       // the tour is over: closing the Journal takes her home, to the
-      // game (Bhanu 2026-11-18 11:56: no Welcome screen any more) -
-      // Milo asks where to go next
-      this.enterGame();
+      // Welcome screen (Bhanu 2026-11-18: Close Journal goes back
+      // to the main screen)
+      this.showWelcome();
       return;
     }
     this.refreshUI();
@@ -3646,7 +3695,8 @@ export class TourSystem extends createSystem({
    * in for the real head height. */
   private updateSeatBoost(dt: number): void {
     // in the game, in the car and on foot alike - not in the tutorial
-    // void (there is no Welcome screen any more)
+    // void (and the Welcome screen counts as in the game: she sits
+    // in her chair there too)
     const inGame = !['tutorial', 'tutdone'].includes(this.phase);
     let target = 0;
     if (inGame) {
@@ -5026,20 +5076,19 @@ export class TourSystem extends createSystem({
     this.speak(text);
   }
 
-  /** Say a guard line exactly ONCE. There is no Welcome screen any
-   * more (Bhanu 2026-11-18 11:56), so the bubble always exists: it
-   * carries Milo's words and the panel keeps showing the phase (story
-   * card, tutorial line) - the guard line must appear in exactly one
-   * of them, never both at once. (Bhanu 2026-11-17: the photo-first
-   * line showed in the bubble AND the panel at the same time.) */
+  /** Say a guard line exactly ONCE. The bubble carries Milo's words
+   * and the panel keeps showing the phase (story card, tutorial
+   * line) - the guard line must appear in exactly one of them, never
+   * both at once. (Bhanu 2026-11-17: the photo-first line showed in
+   * the bubble AND the panel at the same time.) */
   private sayOnce(text: string): void {
     this.speak(text);
   }
 
   /** Milo's words, written in the little cloud beside him - the live
    * English transcript of what he is saying, while he speaks. Shown
-   * from the first moment (he is standing in front of her, talking);
-   * there is no Welcome screen any more, so no phase hides it. */
+   * from the first moment in the game (he is standing in front of
+   * her, talking); on the Welcome screen it stays hidden. */
   private setBubble(text: string): void {
     if (!this.speechBubble) return;
     const first = text.split('. ')[0] ?? text;
@@ -5932,6 +5981,7 @@ export class TourSystem extends createSystem({
       String(this.lastClipPlayed),
       String(this.lastClipPlayOk),
       String(this.lastClipError),
+      String(this.welcomeButtonsShown),
       String(this.musicMaster ? this.musicMaster.gain.value : 'null'),
     ].join('|');
     if (!force && want === this.lastSeen) return;
@@ -5997,6 +6047,7 @@ export class TourSystem extends createSystem({
       dbg.introEndMs = Math.round(this.introEndMs);
       dbg.introLineIdx = this.introLineIdx;
       dbg.musicGain = this.musicMaster ? this.musicMaster.gain.value : null;
+      dbg.enterButtonsShown = this.welcomeButtonsShown;
       dbg.shownButtons = [...this.shownButtons];
       dbg.visited = [...this.visited];
     }
@@ -6041,6 +6092,7 @@ export class TourSystem extends createSystem({
     }
     if (phase && phase !== this.phase) {
       if (phase === 'driving' && place && PLACES[place]) this.driveTo(place);
+      else if (phase === 'enter') this.showWelcome();
       else if (phase === 'choose') this.showChoice();
       else if (phase === 'story') this.onHistoryButton();
       else if (phase === 'tutorial') this.startTutorial();
@@ -6094,6 +6146,7 @@ export class TourSystem extends createSystem({
       lastClipPlayed: this.lastClipPlayed,
       lastClipPlayOk: this.lastClipPlayOk,
       musicGain: this.musicMaster ? this.musicMaster.gain.value : null,
+      enterButtonsShown: this.welcomeButtonsShown,
       shownButtons: [...this.shownButtons],
       visited: [...this.visited],
     };
@@ -6171,9 +6224,10 @@ export class TourSystem extends createSystem({
     this.trailN = 0;
     this.sawWest = false;
     this.sawEast = false;
-    // a fresh load starts straight in the game (Bhanu 2026-11-18
-    // 11:56: no Welcome screen any more) - Milo asks where to go
-    this.enterGame();
+    // a fresh load starts on the Welcome screen (Bhanu 2026-11-18
+    // 12:50: title + the two boxes, photo out) - Milo asks where to
+    // go once she taps a box
+    this.showWelcome();
     const check = (name: string, fn: () => boolean) => {
       try {
         this.testResults[name] = !!fn();
@@ -6319,28 +6373,18 @@ export class TourSystem extends createSystem({
     };
 
     void (async () => {
-      // ---- entry: straight to the game (Bhanu 2026-11-18 11:56 -
-      // the whole Welcome screen is removed: no title, no cover
-      // page, no thumbnail, no two boxes) - Milo asks where to go,
-      // mic first, no city, no car yet ----
+      // ---- entry: the Welcome screen (Bhanu 2026-11-18 12:50:
+      // exactly like fix-3b - title + Milo + the two boxes after
+      // 2 s - only the photo is out, plain background) - no city,
+      // no car yet, no cover phase ----
       check(
-        'entryStraightToGame',
+        'welcomeScreenShows',
         () =>
-          this.phase === 'choose' &&
+          this.phase === 'enter' &&
           !this.city.visible &&
           !this.carObj.visible &&
           this.miloObj.visible &&
-          this.bubbleText.includes('where shall I take you today') &&
-          this.shownButtons.includes('btn-mic') &&
-          this.shownButtons.includes('btn-tutorial'),
-      );
-      // no welcome screen at all: none of its buttons is ever shown
-      check(
-        'noWelcomeScreen',
-        () =>
-          this.phase === 'choose' &&
-          !this.shownButtons.includes('btn-start-game') &&
-          !this.shownButtons.includes('btn-start-tutorial'),
+          !this.welcomeButtonsShown,
       );
       check('cityHiddenAtEntry', () => !this.city.visible && !this.carObj.visible);
       // ---- landmarks: Empire State, Chrysler, Brooklyn Bridge, Statue ----
@@ -6387,15 +6431,17 @@ export class TourSystem extends createSystem({
       });
       // ---- panels must be IN FRONT of her head (D1: they were behind) ----
       check('panelsInFrontOfHead', panelsInFront);
-      // ---- no Enter XR step: any tap on the page starts XR ----
-      // (the welcome boxes that used to prove this are gone with the
-      // welcome screen; the first-tap path is proven just below, and
-      // the tutorial path proves it again further down)
-      // the first tap on the page must itself start the XR session
-      // (there is no Enter XR step and no welcome screen): spy on
-      // ensureXR, dispatch a tap, and confirm it asked. The guard
-      // skips the real launch while a session is already running, so
-      // no console error is logged.
+      // ---- the two boxes appear exactly 2 s after the title ----
+      await waitFor(() => this.welcomeButtonsShown, 5000);
+      check(
+        'welcomeButtonsAppear',
+        () => this.phase === 'enter' && this.welcomeButtonsShown,
+      );
+      // ---- no Enter XR step: tapping "Start the game" starts XR ----
+      // (a real tap fires pointerdown first, then the click - so the
+      // test does both, in that order, and confirms XR was asked.
+      // The guard skips the real launch while a session is already
+      // running, so no console error is logged.)
       let enterXrAsked = 0;
       const realEnsureXR = this.ensureXR.bind(this);
       this.ensureXR = () => {
@@ -6403,8 +6449,21 @@ export class TourSystem extends createSystem({
         realEnsureXR();
       };
       window.dispatchEvent(new PointerEvent('pointerdown'));
+      clickBtn('btn-start-game');
       await wait(300);
-      check('firstTapStartsXR', () => enterXrAsked >= 1 && this.phase === 'choose');
+      check(
+        'startGameStartsXR',
+        () => enterXrAsked >= 1 && this.phase === 'choose',
+      );
+      // entering the game: Milo asks where to go, mic first
+      check(
+        'startGameEntersGame',
+        () =>
+          this.phase === 'choose' &&
+          this.bubbleText.includes('where shall I take you today') &&
+          this.shownButtons.includes('btn-mic') &&
+          this.shownButtons.includes('btn-tutorial'),
+      );
       // ---- background music (Bhanu 2026-11-17 22:36): the original
       // loop starts on her first tap, and the mute button works ----
       await wait(1500);
@@ -6490,11 +6549,11 @@ export class TourSystem extends createSystem({
       check('tutorialSkipShownFromLineOne', () => this.shownButtons.includes('btn-skip'));
       clickBtn('btn-skip');
       await wait(300);
-      check('tutorialSkipFromLineOneWorks', () => this.phase === 'choose');
-      // the tutorial stays reachable from the game screen (the
-      // Welcome screen is gone): the small Tutorial button on the
-      // tour panel restarts it
-      clickBtn('btn-tutorial');
+      check('tutorialSkipFromLineOneWorks', () => this.phase === 'enter');
+      // Skip returns to the Welcome screen - and the "Start
+      // tutorial" box there (visible on the welcome screen) starts
+      // it again from line 1
+      clickBtn('btn-start-tutorial');
       await wait(300);
       check(
         'tutorialRestartsAfterSkip',
@@ -6548,7 +6607,7 @@ export class TourSystem extends createSystem({
       await waitFor(() => this.phase === 'tutdone', 10000);
       clickBtn('btn-skip');
       await wait(300);
-      check('skipTutorialWorks', () => this.phase === 'choose');
+      check('skipTutorialWorks', () => this.phase === 'enter');
       // Journal empty state (Bhanu 2026-11-18): with nothing saved yet
       // the book says so, and the eyebrow carries no "PAGE 1 OF 0"
       check(
@@ -6558,21 +6617,25 @@ export class TourSystem extends createSystem({
           this.journalPageText().includes('Nothing saved yet') &&
           this.journalPageSub() === 'MY TRAVEL JOURNAL',
       );
-      // Skip goes DIRECTLY back to the game (Bhanu 2026-11-18 11:56:
-      // the Welcome screen is gone) - Milo asks where to go, mic
-      // first, no city, no car yet
+      // Skip goes DIRECTLY back to the Welcome screen (Bhanu
+      // 2026-11-18 12:50: Skip returns to the main screen) - title
+      // + Milo, no city, no car yet
       check(
-        'skipGoesToGame',
+        'skipGoesToWelcome',
         () =>
-          this.phase === 'choose' &&
-          this.shownButtons.includes('btn-mic') &&
-          this.shownButtons.includes('btn-tutorial') &&
+          this.phase === 'enter' &&
           !this.city.visible &&
-          !this.carObj.visible,
+          !this.carObj.visible &&
+          this.miloObj.visible,
       );
-      // already in the game: no "start the game" step any more, the
-      // conversation phase IS the entry - Milo stands back, in front
-      // of her, at 2.2 m (checked next)
+      // enter the game from the Welcome screen again, so the choice
+      // board (and only it) is what the checks below see - the two
+      // boxes take 2 s to appear after Skip
+      await waitFor(() => this.welcomeButtonsShown, 5000);
+      clickBtn('btn-start-game');
+      await wait(300);
+      // back in the game: Milo stands back, in front of her, at
+      // 2.2 m (checked next)
       // Milo stands back now (Bhanu 2026-11-18): at 1.5 m his head
       check('miloStandsBackAtStart', () => {
         const head = this.headPos();
@@ -8055,12 +8118,15 @@ export class TourSystem extends createSystem({
           this.currentLine.includes('Times Square ball') &&
           this.shownButtons.includes('btn-journal-close'),
       );
-      // closing the Journal ends the tour: back to the game (Bhanu
-      // 2026-11-18 11:56: no Welcome screen any more) - Milo asks
-      // where to go next, mic first
+      // closing the Journal ends the tour: back to the Welcome
+      // screen (Bhanu 2026-11-18: Close Journal goes back to the
+      // main screen) - and "Start the game" there enters the game
+      // again, Milo asking where to go, mic first
       clickBtn('btn-journal-close');
       await wait(500);
-      check('goodbyeReturnsToGame', () => this.phase === 'choose');
+      check('goodbyeReturnsToWelcome', () => this.phase === 'enter');
+      clickBtn('btn-start-game');
+      await wait(300);
       check(
         'gameAskReturns',
         () =>
