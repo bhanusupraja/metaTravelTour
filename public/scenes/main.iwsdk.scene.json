@@ -130,7 +130,7 @@
           "driving": false,
           "historyTold": 0,
           "paused": false,
-          "phase": "enter",
+          "phase": "choose",
           "photos": 0,
           "place": "start",
           "testResult": ""

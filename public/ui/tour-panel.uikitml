@@ -113,6 +113,12 @@
     <Button id="btn-start-ride" style="display: none">
       <ButtonLabel>Start ride</ButtonLabel>
     </Button>
+    <!-- Tutorial (Bhanu 2026-11-18 11:56): the Welcome screen is gone,
+         so this small button on the tour panel is the way back into
+         the tutorial from the game screen -->
+    <Button id="btn-tutorial" style="display: none">
+      <ButtonLabel>Tutorial</ButtonLabel>
+    </Button>
   </div>
   <div class="btnrow-center">
     <!-- ONE Google Meet-style mic icon button (Bhanu 2026-11-17 07:43):
@@ -178,10 +184,10 @@
          on the Quest - Seat up / Seat down nudges it a little per tap,
          in the car and on foot. -->
     <Button id="btn-seat-down" style="display: none">
-      <ButtonLabel>Seat down</ButtonLabel>
+      <ArrowDown width="20" height="20" color="#ffffff" />
     </Button>
     <Button id="btn-seat-up" style="display: none">
-      <ButtonLabel>Seat up</ButtonLabel>
+      <ArrowUp width="20" height="20" color="#ffffff" />
     </Button>
   </div>
   <div class="btnrow-center">
@@ -197,10 +203,10 @@
   </div>
   <div class="btnrow-center">
     <Button id="btn-turn-left" style="display: none">
-      <ButtonLabel>Turn left</ButtonLabel>
+      <ArrowLeft width="20" height="20" color="#ffffff" />
     </Button>
     <Button id="btn-turn-right" style="display: none">
-      <ButtonLabel>Turn right</ButtonLabel>
+      <ArrowRight width="20" height="20" color="#ffffff" />
     </Button>
     <Button id="btn-selfdrive" style="display: none">
       <ButtonLabel>Drive yourself</ButtonLabel>
@@ -214,11 +220,9 @@
          shows big < > arrows, not small pills. -->
     <Button id="btn-left" class="btn-big" style="display: none">
       <ArrowLeft width="20" height="20" color="#ffffff" />
-      <ButtonLabel>LEFT</ButtonLabel>
     </Button>
     <Button id="btn-right" class="btn-big" style="display: none">
       <ArrowRight width="20" height="20" color="#ffffff" />
-      <ButtonLabel>RIGHT</ButtonLabel>
     </Button>
     <Button id="btn-pause" style="display: none">
       <ButtonLabel>Pause</ButtonLabel>

@@ -9,8 +9,6 @@
 import { createComponent, Types } from '@iwsdk/core';
 
 export const Phases = {
-  cover: 'cover',
-  enter: 'enter',
   tutorial: 'tutorial',
   tutdone: 'tutdone',
   choose: 'choose',
@@ -40,7 +38,7 @@ export const Places = {
 } as const;
 
 export const TourState = createComponent('TourState', {
-  phase: { type: Types.Enum, default: Phases.enter, enum: Phases },
+  phase: { type: Types.Enum, default: Phases.choose, enum: Phases },
   place: { type: Types.Enum, default: Places.start, enum: Places },
   paused: { type: Types.Boolean, default: false },
   driving: { type: Types.Boolean, default: false },
