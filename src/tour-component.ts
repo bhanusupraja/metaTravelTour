@@ -9,6 +9,7 @@
 import { createComponent, Types } from '@iwsdk/core';
 
 export const Phases = {
+  cover: 'cover',
   enter: 'enter',
   tutorial: 'tutorial',
   tutdone: 'tutdone',

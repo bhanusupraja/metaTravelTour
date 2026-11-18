@@ -159,7 +159,8 @@ const HOLD_CONFIRM_MS = 2000;
 // Fmaj7 - G6, one chord per bar) under a slow music-box melody on the
 // C pentatonic scale (a gentle rise and fall, one note every other
 // step, so it never gets tiring on loop). NOT jazz, NOT lo-fi, NOT
-// orchestral. 16 steps, one step every 500 ms, so one loop is 8 s.
+// orchestral. 16 steps, one step every MUSIC_STEP_MS, so one loop is
+// 16 * 625 ms = 10 s.
 const MUSIC_CHORDS: number[][] = [
   [130.81, 164.81, 196.0, 246.94], // Cmaj7
   [110.0, 130.81, 164.81, 196.0], // Am7
@@ -173,6 +174,10 @@ const MUSIC_MELODY: number[] = [
 // Master music volume (Bhanu 2026-11-18: 0.12 was a bit loud on her
 // phone - 0.08 keeps the loop clearly audible, just softer under Milo)
 const MUSIC_GAIN = 0.08;
+// Music tempo (Bhanu 2026-11-18 10:35): a little slower, please - was
+// 500 ms/step (8 s loop), now 625 ms/step (10 s loop). Same melody,
+// same gain 0.08, just slower.
+const MUSIC_STEP_MS = 625;
 const PLACED_LINE = 'Nice - you put it there! Grab it again any time.';
 // Self-drive (Bhanu 2026-11-16 22:01): she sits LEFT in the driver seat
 // and Milo sits on her RIGHT in the passenger seat, chatting and
@@ -895,7 +900,10 @@ export class TourSystem extends createSystem({
   private els: Record<string, UiEl | null> = {};
 
   // --- tour state (internal authority; mirrored to TourState) ---
-  private phase = 'enter';
+  private phase = 'cover';
+  // First page (Bhanu 2026-11-18 10:35): the thumbnail alone for
+  // exactly 2 s, then Milo + 'Welcome to Travel Tour' (enter phase).
+  private coverShownAtMs = 0;
   // Welcome screen: the two boxes appear 2 s after the title (wall
   // clock, so slow frames can't stall it)
   private enterShownAtMs = 0;
@@ -1761,7 +1769,9 @@ export class TourSystem extends createSystem({
       );
     };
 
-    this.setPhase('enter');
+    // first page (Bhanu 2026-11-18 10:35): the thumbnail alone for
+    // exactly 2 s, then Milo + 'Welcome to Travel Tour'
+    this.setPhase('cover');
     this.syncComponent(true);
     log('tour v2.0 ready');
 
@@ -1894,6 +1904,33 @@ export class TourSystem extends createSystem({
     // at Enter: she may turn in her seat, and a panel fixed in world
     // space drifts off to one side (and off the right edge) as she does
     this.placePanelsInFront();
+    if (phase === 'cover') {
+      // first page (Bhanu 2026-11-18 10:35): the thumbnail alone, full
+      // screen, for exactly 2 s - no title, no boxes, no Milo (he is
+      // still inside the hidden car, so he cannot show yet), no city,
+      // no car, no bubble. update() moves on to 'enter' at 2 s.
+      if (this.city) this.city.visible = false;
+      if (this.carObj) this.carObj.visible = false;
+      if (this.speechBubble) this.speechBubble.visible = false;
+      this.cityRevealed = false;
+      this.hideSouvenirs();
+      // Milo himself hides too: he is usually inside the hidden car,
+      // but if he was standing out (e.g. a return to the cover) his
+      // feet would peek below the backdrop - the first page is the
+      // thumbnail alone, nothing else
+      if (this.miloObj) this.miloObj.visible = false;
+      this.coverShownAtMs = performance.now();
+      this.enterButtonsShown = false;
+      this.showEl('enter-buttons', false);
+      // set the big cover size NOW, not only in the per-frame
+      // placePanelsInFront: the autotest reads the state the same
+      // tick setPhase runs, before the next frame, and the headless
+      // emulator can go ~1 fps between frames
+      if (this.welcomeBg) {
+        this.welcomeBg.visible = true;
+        this.welcomeBg.scale.setScalar(1.5);
+      }
+    }
     if (phase === 'enter') {
       // Enter shows only the Welcome title at first - no city, no car,
       // no souvenirs, and no speech bubble (it only appears once she
@@ -1913,6 +1950,8 @@ export class TourSystem extends createSystem({
       this.cityRevealed = false;
       this.hideSouvenirs();
       this.standMiloInFront();
+      // he shows again now (the cover hides him - see above)
+      if (this.miloObj) this.miloObj.visible = true;
       // Bhanu 2026-11-17 21:29: on her laptop Milo sat too far down
       // the starting screen, so he stands higher here (+0.25 m) on the
       // Welcome screen only - at arrivals he stays on the footpath
@@ -1923,6 +1962,9 @@ export class TourSystem extends createSystem({
       this.enterShownAtMs = performance.now();
       this.enterButtonsShown = false;
       this.showEl('enter-buttons', false);
+      // back to normal size (the cover is bigger) - placePanelsInFront
+      // keeps it there every frame; this sets it the same tick
+      if (this.welcomeBg) this.welcomeBg.scale.setScalar(1);
     }
   }
 
@@ -2030,7 +2072,7 @@ export class TourSystem extends createSystem({
       this.setEl('title-text', { display: thumbReady ? 'none' : 'flex' });
     }
     if (this.welcomeBg) {
-      this.welcomeBg.visible = this.phase === 'enter';
+      this.welcomeBg.visible = this.phase === 'enter' || this.phase === 'cover';
       if (this.welcomeBg.visible) {
         this.welcomeBg.position.set(
           head.x + fwd.x * 1.0,
@@ -2038,6 +2080,11 @@ export class TourSystem extends createSystem({
           head.z + fwd.z * 1.0,
         );
         this.welcomeBg.rotation.set(-0.07, yaw, 0);
+        // first page (Bhanu 2026-11-18 10:35): on the cover the
+        // thumbnail IS the whole page, so it is bigger (2.4 x 1.35 m);
+        // on the Welcome screen it goes back to 1.6 x 0.9 m with the
+        // title and the two buttons on top
+        this.welcomeBg.scale.setScalar(this.phase === 'cover' ? 1.5 : 1);
       }
     }
     if (this.titlePanel) {
@@ -2142,14 +2189,15 @@ export class TourSystem extends createSystem({
   private refreshUI(): void {
     if (!this.tourPanel || !this.titlePanel) return;
     const p = this.phase;
-    // the enter screen is the only thing on screen at the enter phase
+    // the enter screen is the only thing on screen at the enter phase;
+    // the cover phase shows only the thumbnail plane, no panel at all
     this.setEl('title-root', { display: p === 'enter' ? 'flex' : 'none' });
-    this.setEl('tour-root', { display: p === 'enter' ? 'none' : 'flex' });
+    this.setEl('tour-root', { display: p === 'enter' || p === 'cover' ? 'none' : 'flex' });
     // no tour buttons show at Enter - clear the list here, before the
     // early return, or it stays stale from the previous phase (a re-run
     // of the autotest then reads the old buttons at the Enter screen)
     this.shownButtons = [];
-    if (p === 'enter') return;
+    if (p === 'enter' || p === 'cover') return;
     // the two-hand circle ring shows only while the ride waits (ready)
     if (this.readyRing) this.readyRing.visible = p === 'ready';
 
@@ -4799,11 +4847,11 @@ export class TourSystem extends createSystem({
     this.musicStep = 0;
     this.musicPlaying = true;
     this.musicTick();
-    this.musicTimer = setInterval(() => this.musicTick(), 500);
+    this.musicTimer = setInterval(() => this.musicTick(), MUSIC_STEP_MS);
     log('background music started (original Web Audio loop)');
   }
 
-  /** One step of the loop (every 500 ms): a pad chord at the start of
+  /** One step of the loop (every MUSIC_STEP_MS - 625 ms): a pad chord at the start of
    * each bar (4 steps), and a music-box melody note on some steps. */
   private musicTick(): void {
     const ctx = this.audioCtx;
@@ -6068,6 +6116,7 @@ export class TourSystem extends createSystem({
       else if (phase === 'choose') this.showChoice();
       else if (phase === 'story') this.onHistoryButton();
       else if (phase === 'tutorial') this.startTutorial();
+      else if (phase === 'cover') this.setPhase('cover');
       else if (phase === 'enter') this.setPhase('enter');
       else if (phase === 'tutdone') this.setPhase('tutdone');
       else if (phase === 'arrived') this.setPhase('arrived');
@@ -6196,7 +6245,10 @@ export class TourSystem extends createSystem({
     this.trailN = 0;
     this.sawWest = false;
     this.sawEast = false;
-    this.setPhase('enter');
+    // a fresh load starts on the cover: thumbnail alone for 2 s, then
+    // the Welcome screen (setPhase('enter') here would skip the cover
+    // and the cover checks below would read the wrong phase)
+    this.setPhase('cover');
     const check = (name: string, fn: () => boolean) => {
       try {
         this.testResults[name] = !!fn();
@@ -6342,6 +6394,37 @@ export class TourSystem extends createSystem({
     };
 
     void (async () => {
+      // ---- first page (Bhanu 2026-11-18 10:35): the thumbnail alone
+      // for exactly 2 s, then Milo + 'Welcome to Travel Tour' ----
+      check(
+        'coverThumbnailFirst',
+        () =>
+          this.phase === 'cover' &&
+          this.shownButtons.length === 0 &&
+          !this.enterButtonsShown &&
+          !this.city.visible &&
+          !this.carObj.visible &&
+          !this.miloObj.visible,
+      );
+      // the cover size, read the same tick as the phase check (before
+      // any load wait): on the cover the thumbnail is the whole page,
+      // bigger (scale 1.5 = 2.4 x 1.35 m) than on the Welcome screen
+      check('coverThumbnailBig', () => {
+        if ((this.welcomeBg?.visible ?? false) !== true) return false;
+        return (this.welcomeBg?.scale.x ?? 1) > 1.4;
+      });
+      await waitFor(() => this.welcomeBgImg?.complete === true, 5000);
+      // the picture itself: checked after the load wait, apart from
+      // the size - the 2 s cover can end before a slow image load
+      // finishes, and the map stays set on the Welcome screen after
+      check('coverThumbnailShown', () => {
+        const mat = this.welcomeBg?.material as unknown as
+          | MeshBasicMaterial
+          | undefined;
+        return mat?.map != null;
+      });
+      await waitFor(() => this.phase === 'enter', 5000);
+      check('coverTransitionsToEnter', () => this.phase === 'enter');
       // ---- enter screen: only two options, nothing else ----
       check(
         'enterShown',
@@ -6434,6 +6517,9 @@ export class TourSystem extends createSystem({
           this.musicMaster !== null &&
           Math.abs(this.musicMaster.gain.value - MUSIC_GAIN) < 0.001,
       );
+      // music slower (Bhanu 2026-11-18 10:35): same melody, same gain,
+      // just a slower step - 625 ms/step (10 s loop), was 500 ms (8 s)
+      check('musicTempoSlower', () => MUSIC_STEP_MS === 625);
       check('musicMuteWorks', () => {
         const before = this.musicMuted;
         clickBtn('btn-music');
@@ -8111,6 +8197,12 @@ export class TourSystem extends createSystem({
     // distance ahead of her viewpoint, always - scenery can never get
     // between her eyes and a panel 0.85 m ahead.
     this.placePanelsInFront();
+
+    // ---- first page (Bhanu 2026-11-18 10:35): the thumbnail alone
+    // for exactly 2 s, then Milo + 'Welcome to Travel Tour' ----
+    if (this.phase === 'cover' && performance.now() - this.coverShownAtMs >= 2000) {
+      this.setPhase('enter');
+    }
 
     // ---- Welcome screen: the two boxes appear 2 s after the title ----
     // (wall clock: slow frames can't stall it; the boxes start hidden
