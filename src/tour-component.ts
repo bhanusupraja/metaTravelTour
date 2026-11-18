@@ -47,7 +47,7 @@ export const TourState = createComponent('TourState', {
   photos: { type: Types.Int32, default: 0 },
   autotest: { type: Types.Boolean, default: false },
   testResult: { type: Types.String, default: '' },
-  // self-drive (Bhanu 2026-11-16 22:01): she in the driver seat, Chitti
+  // self-drive (Bhanu 2026-11-16 22:01): she in the driver seat, Milo
   // on her right in the passenger seat
   selfDriving: { type: Types.Boolean, default: false },
   // tour Journal (Bhanu 2026-11-16 22:06): saved souvenirs + photos,

@@ -47,7 +47,7 @@
       },
       "framingRole": "content",
       "id": "tour-car",
-      "name": "Tour Car with Chitti"
+      "name": "Tour Car with Milo"
     },
     {
       "components": {
@@ -108,7 +108,7 @@
       },
       "framingRole": "content",
       "id": "speech-bubble",
-      "name": "Chitti Speech Bubble",
+      "name": "Milo Speech Bubble",
       "transform": {
         "position": [
           -0.95,

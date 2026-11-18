@@ -1,5 +1,5 @@
 <!--
-  Chitti's speech bubble. A small cloud-style window that floats in front
+  Milo's speech bubble. A small cloud-style window that floats in front
   of her, centred in her view and above the tour panel, and shows what he
   is saying, so she can read his words while she talks to him by voice.
   The system moves it to sit in front of her and updates the text every
@@ -41,7 +41,7 @@
 </style>
 <Panel id="bubble-root" class="bubble-root">
   <div class="bubble-content">
-    <div class="bubble-name">CHITTI SAYS</div>
-    <div id="bubble-text" class="bubble-text">Hi! I'm Chitti.</div>
+    <div class="bubble-name">MILO SAYS</div>
+    <div id="bubble-text" class="bubble-text">Hi! I'm Milo.</div>
   </div>
 </Panel>

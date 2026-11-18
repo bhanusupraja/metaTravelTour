@@ -1,16 +1,16 @@
 /**
- * Travel Agent Tour v2.0 - the luxury convertible + Chitti the robot driver.
+ * Travel Agent Tour v2.0 - the luxury convertible + Milo the robot driver.
  *
  * Forward is -Z (Three.js convention). The robot sits IN the driver's
  * seat with both hands on the steering wheel - never standing in the road.
  * The car sits forward of the rider (CAR_HOME in the tour system), so
  * from the passenger seat she looks forward over the front seats and
- * sees Chitti driving ahead-left, hands on the wheel, road ahead -
- * the Screen_3 framing (Bhanu 2026-11-17: "carல లేదు", Chitti was not
+ * sees Milo driving ahead-left, hands on the wheel, road ahead -
+ * the Screen_3 framing (Bhanu 2026-11-17: "carல లేదు", Milo was not
  * visible in the car in the ready picture).
  *
  * Named parts (the TourSystem finds them by name - never by index):
- *   steerWheel, robotHead, chitti, wheelFL, wheelFR, wheelRL, wheelRR.
+ *   steerWheel, robotHead, milo, wheelFL, wheelFR, wheelRL, wheelRR.
  */
 import {
   BoxGeometry,
@@ -102,7 +102,7 @@ export function createTourCar(): Group {
   car.add(benchBase);
 
   // steering wheel (driver side) - chrome rim, so it catches the light
-  // and reads in the forward view; close enough for Chitti's hands to
+  // and reads in the forward view; close enough for Milo's hands to
   // rest on the rim; turns with the car
   const steerWheel = new Mesh(
     new TorusGeometry(0.26, 0.045, 8, 20),
@@ -121,8 +121,8 @@ export function createTourCar(): Group {
   column.rotation.x = Math.PI / 2 - 0.21;
   car.add(column);
 
-  // Chitti, the robot driver - rebuilt to the reference photo Bhanu sent
-  // (2026-11-16, CHITTI_REFERENCE_NEW.png: "robo chitti should be like
+  // Milo, the robot driver - rebuilt to the reference photo Bhanu sent
+  // (2026-11-16, MILO_REFERENCE_NEW.png: "robo milo should be like
   // this one"). Bhanu 2026-11-17 04:38: "the robotics is not good at
   // all. Can you change the robot design? To the one I have shared you."
   // The old build was too tall and humanoid, eyes too small. The
@@ -148,7 +148,7 @@ export function createTourCar(): Group {
   // them - forward to the wheel while he drives, hanging with elbows
   // bent while he stands, like the photo.
   const robot = new Group();
-  robot.name = 'chitti';
+  robot.name = 'milo';
   // white shell (the reference body/head) + light-blue accents
   const white = new MeshStandardMaterial({
     color: 0xf5f7fa,
@@ -228,7 +228,7 @@ export function createTourCar(): Group {
     eyeball.position.set(x, 0.01, -0.235);
     head.add(eyeball);
     const iris = new Mesh(new SphereGeometry(0.082, 20, 14), brightBlue);
-    iris.name = x < 0 ? 'chitti-iris-l' : 'chitti-iris-r';
+    iris.name = x < 0 ? 'milo-iris-l' : 'milo-iris-r';
     iris.scale.set(1, 1, 0.55);
     iris.position.set(x, 0.01, -0.291);
     head.add(iris);
@@ -264,7 +264,7 @@ export function createTourCar(): Group {
     new TorusGeometry(0.052, 0.008, 8, 16, Math.PI),
     new MeshBasicMaterial({ color: 0x475569 }),
   );
-  smile.name = 'chitti-smile';
+  smile.name = 'milo-smile';
   smile.position.set(0, -0.06, -0.283);
   smile.rotation.z = Math.PI;
   head.add(smile);
@@ -316,7 +316,7 @@ export function createTourCar(): Group {
   robot.position.set(-0.45, 0, 0.35);
   car.add(robot);
 
-  // warm cabin light so Chitti reads clearly from the passenger seat
+  // warm cabin light so Milo reads clearly from the passenger seat
   const cabin = new PointLight(0xffe9b8, 2.0, 4.0);
   cabin.position.set(0, 1.9, 0.1);
   car.add(cabin);

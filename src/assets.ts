@@ -1,7 +1,7 @@
 /**
  * Travel Agent Tour v2.0 - asset catalog.
  *
- * Fully offline: the city and the car (with Chitti) are procedural
+ * Fully offline: the city and the car (with Milo) are procedural
  * TypeScript assets, and the panels are local UIKitML files. No external
  * CDN assets - the starter's stock robot GLTF is gone.
  */

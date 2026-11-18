@@ -1,7 +1,7 @@
 /**
  * Travel Agent Tour v2.0 - grab-and-go souvenirs for the photo moment.
  *
- * After she and Chitti step out of the car at a destination, small
+ * After she and Milo step out of the car at a destination, small
  * souvenirs wait on a side table beside her: a camera, a mini Statue of
  * Liberty, a New York coffee cup, a mini Liberty torch, a vintage brass
  * pocket-watch, a polaroid photo, a glowing miniature skyscraper, a

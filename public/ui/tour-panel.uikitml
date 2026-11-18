@@ -94,7 +94,7 @@
 </style>
 <Panel id="tour-root" class="panel-root">
   <div class="panel-content">
-    <div id="tour-sub" class="eyebrow">CHITTI</div>
+    <div id="tour-sub" class="eyebrow">MILO</div>
     <div id="tour-line" class="line">Welcome!</div>
   </div>
   <div class="btnrow">
@@ -129,6 +129,17 @@
     <Button id="btn-photo" style="display: none">
       <ButtonLabel id="btn-photo-label">Photo</ButtonLabel>
     </Button>
+    <!-- Photo / Selfie toggle (Bhanu 2026-11-17 22:27): the label names
+         the mode it switches to - "Selfie" in photo mode, "Photo" in
+         selfie mode -->
+    <Button id="btn-selfie" style="display: none">
+      <ButtonLabel id="btn-selfie-label">Selfie</ButtonLabel>
+    </Button>
+    <!-- Background music mute (Bhanu 2026-11-17 22:36): "Music" while
+         playing, "Music off" while muted -->
+    <Button id="btn-music" style="display: none">
+      <ButtonLabel id="btn-music-label">Music</ButtonLabel>
+    </Button>
   </div>
   <div class="btnrow-center">
     <Button id="btn-journal" style="display: none">
@@ -139,6 +150,18 @@
     </Button>
     <Button id="btn-journal-close" style="display: none">
       <ButtonLabel>Close Journal</ButtonLabel>
+    </Button>
+    <Button id="btn-journal-prev" style="display: none">
+      <ButtonLabel>Previous page</ButtonLabel>
+    </Button>
+    <Button id="btn-journal-next" style="display: none">
+      <ButtonLabel>Next page</ButtonLabel>
+    </Button>
+    <Button id="btn-journal-open-photo" style="display: none">
+      <ButtonLabel>Open photo</ButtonLabel>
+    </Button>
+    <Button id="btn-journal-close-photo" style="display: none">
+      <ButtonLabel>Close photo</ButtonLabel>
     </Button>
   </div>
   <div class="btnrow-center">
@@ -162,8 +185,8 @@
     <Button id="btn-selfdrive" style="display: none">
       <ButtonLabel>Drive yourself</ButtonLabel>
     </Button>
-    <Button id="btn-chittidrive" style="display: none">
-      <ButtonLabel>Let Chitti drive</ButtonLabel>
+    <Button id="btn-milodrive" style="display: none">
+      <ButtonLabel>Let Milo drive</ButtonLabel>
     </Button>
   </div>
   <div class="btnrow">
@@ -196,10 +219,15 @@
     <!-- "I'm done" (Bhanu 2026-11-17): the end of the whole tour - she
          taps it when she has visited enough places and feels done. It
          shows at a destination and at the left/right choice, never
-         covering Chitti: it lives in the tour panel, which steps right
+         covering Milo: it lives in the tour panel, which steps right
          of him out of the car. -->
     <Button id="btn-im-done" style="display: none">
       <ButtonLabel>I'm done</ButtonLabel>
+    </Button>
+    <!-- "Thank you, Milo!" (Bhanu 2026-11-17): she thanks him when a
+         visit closes - he took her there, not the other way round. -->
+    <Button id="btn-thank-milo" class="btn-big" style="display: none">
+      <ButtonLabel>Thank you, Milo!</ButtonLabel>
     </Button>
   </div>
 </Panel>

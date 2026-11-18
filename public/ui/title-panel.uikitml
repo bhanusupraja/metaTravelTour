@@ -2,7 +2,7 @@
   Welcome screen: the title "Welcome to Travel Tour" shows alone
   first; after 2 seconds two glowing boxes appear on the same screen -
   "Start tutorial" (left) and "Start the game" (right). The panel
-  itself is transparent so Chitti shows through the middle; only the
+  itself is transparent so Milo shows through the middle; only the
   title and the two pill buttons are visible. The boxes start hidden
   (display: none) and the tour system shows them 2 s after the screen
   appears. No "Enter the game", no Enter XR step: tapping a box

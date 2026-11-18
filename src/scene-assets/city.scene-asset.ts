@@ -1134,10 +1134,15 @@ export function createCity(): Group {
   statueGroup.scale.setScalar(1.5);
   add(statueGroup);
   // skyline across the water
+  // Bhanu 2026-11-17 19:24: these towers stood 18-48 m tall and hid the
+  // Brooklyn Bridge (39 m) behind them from every waterfront viewpoint,
+  // so the bridge she asked to see was invisible. They are capped at
+  // 26 m now: the far shore still reads, and the bridge towers, caps
+  // and cable tops rise above it.
   const acrossTex = towerTex(rng, '#1a1436', '#2a2050', 0.3);
   const acrossMat = new MeshStandardMaterial({ map: acrossTex, roughness: 0.9 });
   [-60, -35, -12, 14, 38, 62].forEach((dx) => {
-    const ah = 18 + rng() * 30;
+    const ah = 18 + rng() * 8;
     const at = new Mesh(new BoxGeometry(14 + rng() * 8, ah, 12), acrossMat);
     at.position.set(dx, ah / 2, 150 + rng() * 10);
     add(at);
@@ -1163,7 +1168,7 @@ export function createCity(): Group {
   // ---- traffic: taxis + bus on the avenue (named, animated by the system) ----
   // 14 taxis now, not 10 (Bhanu 2026-11-17 18:17): a little more life on
   // the roads at Times Square and Central Park. They still hide while
-  // she is on foot - the earlier fix for a taxi crossing Chitti's face.
+  // she is on foot - the earlier fix for a taxi crossing Milo's face.
   const yellow = new MeshStandardMaterial({ color: 0xfacc15, metalness: 0.4, roughness: 0.4 });
   for (let i = 0; i < 14; i++) {
     const t = new Group();
@@ -1339,9 +1344,13 @@ export function createCity(): Group {
   }
   for (let wi = 0; wi < 32; wi++) {
     const side = wi % 2 ? -1 : 1;
+    // keep-out (Bhanu 2026-11-17): the east walkers pass her Broadway /
+    // Grand Central stand spots (x ~16), so they stay on the inner edge
+    // of the east sidewalk (x 10.5-11.5); the west side keeps its range
+    const wx = side > 0 ? 10.5 + rng() * 1.0 : 10.5 + rng() * 3.2;
     addPerson(
       wi,
-      side * (10.5 + rng() * 3.2),
+      side * wx,
       10 - rng() * 135,
       side > 0 ? -1 : 1,
       0.5 + rng() * 0.8,
@@ -1365,7 +1374,7 @@ export function createCity(): Group {
   // Battery promenade (z 26..44), never in the water: the harbour water
   // starts at z=45, so the old spots (z 46-50) stood ON the water.
   // Bhanu 2026-11-17 18:17. They stand along the promenade's south
-  // edge, clear of Chitti's spot (-12,40) and of the bridge walkway
+  // edge, clear of Milo's spot (-12,40) and of the bridge walkway
   // (x 8..20, z 40..44) - the old z 30-38 spots sat 2 m from the
   // walkway footpath and a static figure blocked the bridge picture.
   addPerson(1, -7, 41, 0, 0, true, 0);
@@ -1393,7 +1402,7 @@ export function createCity(): Group {
   add(plazaLight2);
 
   // ---- Times Square pedestrian island: a raised pad between the
-  // avenue lanes (x -4..4, z -71..-63) where Chitti stands in front of
+  // avenue lanes (x -4..4, z -71..-63) where Milo stands in front of
   // her after arriving - off the road, with a kerb, bollards and
   // planters so it reads as a plaza, not asphalt
   const islandPad = new Mesh(
@@ -1569,22 +1578,81 @@ export function createCity(): Group {
   add(chrysler);
 
   // ---- Brooklyn Bridge (named landmark) over the harbour water ----
+  // Bhanu 2026-11-17 19:24: the span looked plain, so it is rebuilt to
+  // read like the real Brooklyn Bridge - two stone towers with pointed
+  // Gothic arches, draped main cables, vertical suspenders, and the
+  // raised centre pedestrian walkway - still simple primitives, still
+  // light for the Quest. The span stays at z=170, behind the island,
+  // so it never crosses the Statue of Liberty view again (see the
+  // 18:17 note below: it sat at z=130 and cut across the statue).
   const bridge = new Group();
   bridge.name = 'brooklynBridge';
   const deckMat = new MeshStandardMaterial({ color: 0x374151, roughness: 0.8 });
   const bridgeStone = new MeshStandardMaterial({ color: 0x9c8e7a, roughness: 0.9 });
   const cableMat = new MeshStandardMaterial({ color: 0x1f2937, roughness: 0.6 });
+  const bridgeWalkMat = new MeshStandardMaterial({ color: 0xc9a86a, roughness: 0.9 });
+  const edgeMat = new MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.7 });
   const bDeck = new Mesh(new BoxGeometry(170, 1.4, 9), deckMat);
   bDeck.position.set(0, 8, 0);
   bridge.add(bDeck);
-  // two stone towers with pointed (Gothic) caps
+  // light edge strips along the deck, and the raised pedestrian
+  // walkway down the middle, as on the real bridge
+  [-4.4, 4.4].forEach((dz) => {
+    const edge = new Mesh(new BoxGeometry(170, 0.35, 0.3), edgeMat);
+    edge.position.set(0, 8.85, dz);
+    bridge.add(edge);
+  });
+  const bWalk = new Mesh(new BoxGeometry(170, 0.5, 2.8), bridgeWalkMat);
+  bWalk.name = 'bridgeWalkwayDeck';
+  bWalk.position.set(0, 9.4, 0);
+  bridge.add(bWalk);
+  [-1.5, 1.5].forEach((dz) => {
+    const rail = new Mesh(new BoxGeometry(170, 0.3, 0.12), cableMat);
+    rail.position.set(0, 10.0, dz);
+    bridge.add(rail);
+  });
+  // stone end piers grounding the span where it meets the shore
+  [-86, 86].forEach((ex) => {
+    const pier = new Mesh(new BoxGeometry(5, 8, 10), bridgeStone);
+    pier.position.set(ex, 4, 0);
+    bridge.add(pier);
+  });
+  // a box stretched between two points (for the arch slants)
+  const boxBetween = (
+    a: [number, number, number],
+    b: [number, number, number],
+    w: number,
+    d: number,
+    mat: MeshStandardMaterial,
+    name?: string,
+  ) => {
+    const va = new Vector3(a[0], a[1], a[2]);
+    const vb = new Vector3(b[0], b[1], b[2]);
+    const dir = vb.clone().sub(va);
+    const len = dir.length();
+    const m = new Mesh(new BoxGeometry(w, len, d), mat);
+    m.position.copy(va).add(vb).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), dir.normalize());
+    if (name) m.name = name;
+    bridge.add(m);
+  };
+  // two stone towers with pointed Gothic arches: twin legs, a pointed
+  // arch opening between them (the deck and walkway pass through it),
+  // a cap and a pyramid peak - the real bridge's silhouette
   [-32, 32].forEach((tx) => {
-    [-2.2, 2.2].forEach((dz) => {
-      const col = new Mesh(new BoxGeometry(3, 30, 3), bridgeStone);
+    const base = new Mesh(new BoxGeometry(6, 5, 11), bridgeStone);
+    base.position.set(tx, 2.5, 0);
+    bridge.add(base);
+    [-3.2, 3.2].forEach((dz) => {
+      const col = new Mesh(new BoxGeometry(3.2, 30, 3.2), bridgeStone);
       col.position.set(tx, 15, dz);
       bridge.add(col);
     });
-    const cap = new Mesh(new BoxGeometry(9, 2, 8), bridgeStone);
+    // pointed arch: two slants rising from the legs' inner faces to
+    // meet at a point above the walkway
+    boxBetween([tx, 11, -1.6], [tx, 26.5, 0], 1.6, 2.4, bridgeStone, 'bridgeArch');
+    boxBetween([tx, 11, 1.6], [tx, 26.5, 0], 1.6, 2.4, bridgeStone, 'bridgeArch');
+    const cap = new Mesh(new BoxGeometry(9, 2, 10), bridgeStone);
     cap.position.set(tx, 31, 0);
     bridge.add(cap);
     const peak = new Mesh(new ConeGeometry(4.5, 7, 4), bridgeStone);
@@ -1607,13 +1675,26 @@ export function createCity(): Group {
     m.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), dir.normalize());
     bridge.add(m);
   };
+  // the main cable drapes in a curve between the towers, not a V:
+  // y(x) = 13 + 19*(x/32)^2, tower tops at y=32, midspan low at y=13
+  const cableY = (x: number) => 13 + 19 * (x / 32) ** 2;
+  const spanXs = [-32, -24, -16, -8, 0, 8, 16, 24, 32];
   [-4.4, 4.4].forEach((dz) => {
-    cableBetween([-32, 32, dz], [0, 12, dz], 0.18);
-    cableBetween([0, 12, dz], [32, 32, dz], 0.18);
-    // vertical suspenders from the cable down to the deck
-    [-16, 16].forEach((sx) => {
-      const sus = new Mesh(new CylinderGeometry(0.08, 0.08, 14, 4), cableMat);
-      sus.position.set(sx, 15, dz);
+    for (let i = 0; i < spanXs.length - 1; i++) {
+      cableBetween(
+        [spanXs[i], cableY(spanXs[i]), dz],
+        [spanXs[i + 1], cableY(spanXs[i + 1]), dz],
+        0.22,
+      );
+    }
+    // side spans: tower tops down to the end piers
+    cableBetween([-32, 32, dz], [-85, 9.5, dz], 0.22);
+    cableBetween([32, 32, dz], [85, 9.5, dz], 0.22);
+    // vertical suspenders from the draped cable down to the deck
+    [-28, -20, -12, -4, 4, 12, 20, 28].forEach((sx) => {
+      const top = cableY(sx);
+      const sus = new Mesh(new CylinderGeometry(0.08, 0.08, top - 8.7, 4), cableMat);
+      sus.position.set(sx, (8.7 + top) / 2, dz);
       bridge.add(sus);
     });
   });
@@ -1917,7 +1998,7 @@ export function createCity(): Group {
     // Bhanu 2026-11-17: the old rails (y 1.5, 3.4 m long, tilted 0.4)
     // crossed the frame as a thick gold bar at eye level in the Grand
     // Central picture. These sit low (y 1.1, 2.6 m, gentle tilt) so
-    // they read as stair rails, never as a bar across Chitti's face.
+    // they read as stair rails, never as a bar across Milo's face.
     const rail = new Mesh(new CylinderGeometry(0.04, 0.04, 2.6, 6), gcGold);
     rail.rotation.z = Math.PI / 2 - 0.25;
     rail.position.set(-6.8, 1.1, rz);
@@ -1925,9 +2006,11 @@ export function createCity(): Group {
   });
   // people in the hall, looking at the clock and the boards
   // (addPerson takes world coords - the hall sits at world 16,-50)
+  // keep-out (Bhanu 2026-11-17): the two closest stood 3 m from her
+  // Grand Central stand spot - they now stand by the boards, clear of it
   addPerson(0, 10, -54, 0, 0, true, Math.PI / 2);
-  addPerson(3, 13, -46, 0, 0, true, -Math.PI / 2);
-  addPerson(5, 18, -56, 0, 0, true, Math.PI / 2);
+  addPerson(3, 21, -46, 0, 0, true, -Math.PI / 2);
+  addPerson(5, 22, -56, 0, 0, true, Math.PI / 2);
   addPerson(1, 22, -47, 0, 0, true, -Math.PI / 2);
   addPerson(6, 11, -44, 0, 0, true, Math.PI / 2);
   addPerson(2, 23, -53, 0, 0, true, -Math.PI / 2);
@@ -2005,7 +2088,7 @@ export function createCity(): Group {
     add(t);
   });
   // people on the deck, at the railing rim looking out (never in the
-  // middle where she and Chitti stand - the old ones blocked a quarter
+  // middle where she and Milo stand - the old ones blocked a quarter
   // of the frame). They stand on the platform (y 26), facing outward.
   addPerson(3, 15.2, -80, 0, 0, true, Math.PI / 2, 26);
   addPerson(5, 8.8, -80, 0, 0, true, -Math.PI / 2, 26);

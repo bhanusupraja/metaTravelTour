@@ -16,7 +16,7 @@ tried.
 3. She brings both hands together. The two circles slide toward each other
    and **collide into ONE big circle** between her palms. The big circle
    grows and fades over 2 seconds as a portal.
-4. After the portal: she is seated in the PASSENGER seat; Chitti the robot is
+4. After the portal: she is seated in the PASSENGER seat; Milo the robot is
    in the DRIVER'S seat right beside her, hands on the wheel, visible at all
    times, steering as the car turns. The car is **black**. The camera looks
    **forward** (Times Square ahead), and the view turns with the car when it
@@ -27,7 +27,7 @@ tried.
    only the first ride of a session; later rides start straight away.
 
 ## Bhanu feedback (voice call, 2026-11-14 evening — added after the build started)
-- She is a passenger traveling with Robo (Chitti). Robo must be CUTE and
+- She is a passenger traveling with Robo (Milo). Robo must be CUTE and
   REALISTIC — not blocky. She will share reference photos of the robot she
   wants; until then, make him as cute and realistic as the stylised 3D allows
   (smooth rounded shapes, expressive glowing eyes, friendly face — not a dark
@@ -37,13 +37,13 @@ tried.
 - The current screenshots read wrong: they look like the agent/car is coming
   TOWARD her (front view) with Times Square behind. Fix the camera: she sits
   in the passenger seat looking FORWARD through the windshield, Times Square
-  AHEAD of the car, Chitti beside her (driver's side, left) in side view.
+  AHEAD of the car, Milo beside her (driver's side, left) in side view.
   Never a front view of the car coming at her.
 - She will run the build herself and send more changes after that.
 
 ## Verification
 Autotest: palms apart → two circles shown → palms together → circles merge
-into one → portal opens → passenger-seat view with Chitti driving beside
+into one → portal opens → passenger-seat view with Milo driving beside
 her. Proof screenshots: the circle gesture, and the passenger-seat drive view.
 
 Implemented as: `gesture` + `portal` phases in `src/tour-system.ts`
@@ -55,7 +55,7 @@ fades over a 2 s wall-clock portal; `portalDone` makes later rides direct;
 `btn-start-ride` fallback, labelled "▶ Start ride").
 Player spawn is the passenger seat `[0.45, 0, 0.35]` in
 `public/scenes/main.iwsdk.scene.json` (forward view, no rotation), hero view
-matches. Chitti's arms reach the wheel (wheel moved closer, steering
+matches. Milo's arms reach the wheel (wheel moved closer, steering
 column added, hands on the rim at 10 and 2 o'clock). The car paint is
 near-black (`0x050505`).
 
@@ -65,7 +65,7 @@ near-black (`0x050505`).
   single ring. (`ensureRings`/`hideRings` in `src/tour-system.ts`.)
 - **Start ride button:** after she names a place, a big "▶ Start ride"
   button appears that she can press with her hand — no gesture needed.
-- **Voice:** Chitti speaks in pre-recorded Aria clips (warm, cute, sweet);
+- **Voice:** Milo speaks in pre-recorded Aria clips (warm, cute, sweet);
   she talks back through offline Vosk recognition, toggled by the
   "🎤 Tap to speak" mic button. While he speaks, the mic is gated shut, so
   his voice never echoes back into the recogniser.
@@ -73,8 +73,8 @@ near-black (`0x050505`).
 - **Panels at eye level, within reach:** both panels sit ~0.7 m in front of
   her head and follow it into XR, so every button is tappable by hand.
 - **Arrival + get-out + photo + thank-you + left/right:** after the drive,
-  Chitti says "Here is the destination!", they both step out within 2 s,
+  Milo says "Here is the destination!", they both step out within 2 s,
   she grabs an object (camera / balloon / statue) for the photo, the visit
   ends with "Thank you so much for taking me!", and only then does the
-  left/right choice appear — with Chitti's suggestion and a small gesture
+  left/right choice appear — with Milo's suggestion and a small gesture
   hint. See the README for the full flow.
